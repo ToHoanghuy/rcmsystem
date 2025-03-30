@@ -7,10 +7,16 @@ from scripts.generate_recommendations import generate_recommendations
 # Khởi tạo ứng dụng Flask
 app = Flask(__name__)
 
+
+
 # Đường dẫn đến dữ liệu
 RATINGS_PATH = "data/raw/dataset.csv"
 PRODUCTS_PATH = "data/raw/products.csv"
 EVENTS_PATH = "data/raw/events.csv"
+
+print("Processing data...")
+data = preprocess_data(RATINGS_PATH, PRODUCTS_PATH, EVENTS_PATH)
+print(data.head()) 
 
 # Xử lý dữ liệu
 print("Processing data...")
