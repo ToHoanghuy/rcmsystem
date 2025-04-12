@@ -16,3 +16,14 @@ def preprocess_data(ratings_path, products_path, events_path):
         integrated_data.rename(columns={'rating_x': 'rating'}, inplace=True)
     
     return integrated_data
+
+import pandas as pd
+
+def preprocess_events(events_path):
+    # Đọc dữ liệu sự kiện
+    events = pd.read_csv(events_path)
+    
+    # Tính tần suất sự kiện cho từng người dùng và sản phẩm
+    event_summary = events.groupby(['user_id', 'product_id', 'event_type']).size().unstack(fill_value=0)
+    
+    return event_summary

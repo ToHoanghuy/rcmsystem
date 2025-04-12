@@ -24,4 +24,10 @@ def hybrid_recommendations(collaborative_model, content_similarity, user_id, pro
     
     # Lấy top N sản phẩm có điểm số cao nhất
     top_indices = combined_scores.argsort()[-num_recommendations:][::-1]
-    return product_details.iloc[top_indices]
+    return product_details.iloc[top_indices]  
+
+class MockCollaborativeModel:
+    def predict(self, uid, iid):
+        return type('MockPrediction', (object,), {'est': 4.5})()
+
+collaborative_model = MockCollaborativeModel()
