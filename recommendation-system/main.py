@@ -5,16 +5,21 @@ from scripts.train_model import train_all_models
 from scripts.generate_recommendations import generate_recommendations
 from recommenders.hybrid import hybrid_recommendations
 from recommenders.event_based import recommend_based_on_events
+from services.chat_service import ChatService
 
 # Khởi tạo ứng dụng Flask
 app = Flask(__name__)
 
+# Khởi tạo services
+chat_service = ChatService()
 
 
 # Đường dẫn đến dữ liệu
 RATINGS_PATH = "data/raw/dataset.csv"
 PRODUCTS_PATH = "data/raw/products.csv"
 EVENTS_PATH = "data/raw/events.csv"
+
+
 
 print("Processing data...")
 data = preprocess_data(RATINGS_PATH, PRODUCTS_PATH, EVENTS_PATH)
@@ -69,6 +74,20 @@ def recommend():
         return jsonify({"error": "Invalid case or missing product_id for content-based recommendations"}), 400
 
     return jsonify({"user_id": user_id, "recommendations": recommendations})
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    data = request.get_json()
+    user_message = data.get('message')
+    
+    if not user_message:
+        return jsonify({"error": "Message is required"}), 400
+        
+    try:
+        reply = chat_service.process_query(user_message)
+        return jsonify({"reply": reply})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # Điểm khởi chạy ứng dụng
 if __name__ == "__main__":
