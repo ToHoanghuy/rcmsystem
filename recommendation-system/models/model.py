@@ -3,6 +3,13 @@ from surprise.model_selection import train_test_split, GridSearchCV
 from surprise import accuracy
 
 def train_model(data):
+    # Kiểm tra dữ liệu đầu vào đủ đa dạng
+    if data['user_id'].nunique() < 2 or data['product_id'].nunique() < 2:
+        print("[CẢNH BÁO] Dữ liệu quá ít user hoặc sản phẩm để huấn luyện mô hình.")
+        return None
+    if data['rating'].nunique() < 2:
+        print("[CẢNH BÁO] Tất cả rating đều giống nhau, không thể huấn luyện mô hình phân biệt.")
+        return None
     reader = Reader(rating_scale=(1, 5))
     dataset = Dataset.load_from_df(data[['user_id', 'product_id', 'rating']], reader)
     trainset, testset = train_test_split(dataset, test_size=0.2)

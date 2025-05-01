@@ -161,3 +161,110 @@ def get_similar_products(product_id, similarity_matrix, id_to_index, index_to_id
     similar_products = similar_products.sort_values(by='similarity_score', ascending=False)
     
     return similar_products
+
+def recommend_content_based(user_id, ratings, product_details, top_n=10):
+    """
+    Gợi ý sản phẩm dựa trên Content-Based Filtering
+    
+    Parameters:
+    -----------
+    user_id: int
+        ID của người dùng cần gợi ý
+    ratings: DataFrame
+        DataFrame chứa dữ liệu đánh giá của người dùng với các cột 'user_id', 'product_id', 'rating'
+    product_details: DataFrame
+        DataFrame chứa thông tin chi tiết về sản phẩm
+    top_n: int
+        Số lượng sản phẩm gợi ý cần trả về
+        
+    Returns:
+    --------
+    recommendations: DataFrame
+        DataFrame chứa thông tin về các sản phẩm được gợi ý
+    """
+    print(f"Generating content-based recommendations for user {user_id}")
+    
+    # Kiểm tra xem người dùng có xếp hạng nào không
+    if ratings is None or ratings.empty:
+        # Nếu không có đánh giá nào, trả về các sản phẩm phổ biến nhất
+        if 'rating' in product_details.columns:
+            return product_details.sort_values(by='rating', ascending=False).head(top_n)
+        else:
+            return product_details.head(top_n)
+    
+    # Trích xuất đặc trưng từ sản phẩm
+    features = extract_features(product_details)
+    
+    # Tính ma trận tương đồng
+    similarity_matrix = cosine_similarity(features)
+    
+    # Ánh xạ giữa index và product_id
+    index_to_id = dict(enumerate(product_details['product_id'].values))
+    id_to_index = {id_val: idx for idx, id_val in index_to_id.items()}
+    
+    # Lấy các sản phẩm mà người dùng đã đánh giá cao
+    user_rated_products = ratings[ratings['rating'] >= 4].sort_values(by='rating', ascending=False)
+    
+    # Nếu người dùng không có đánh giá cao nào, lấy tất cả đánh giá của họ
+    if user_rated_products.empty:
+        user_rated_products = ratings
+    
+    # Giới hạn số lượng sản phẩm đã đánh giá để xem xét (để tránh thời gian tính toán quá lâu)
+    user_top_products = user_rated_products.head(5)
+    
+    # Tìm sản phẩm tương tự cho mỗi sản phẩm đã được đánh giá cao
+    similar_items = pd.DataFrame()
+    
+    for _, row in user_top_products.iterrows():
+        product_id = row['product_id']
+        rating = row['rating']
+        
+        try:
+            # Kiểm tra xem product_id có trong danh sách sản phẩm không
+            if product_id not in id_to_index:
+                continue
+                
+            # Lấy sản phẩm tương tự
+            idx = id_to_index[product_id]
+            similarity_scores = similarity_matrix[idx]
+            
+            # Chuyển thành DataFrame
+            similar_df = pd.DataFrame({
+                'product_id': [index_to_id[i] for i in range(len(similarity_scores))],
+                'similarity': similarity_scores,
+                'user_rating': rating
+            })
+            
+            # Loại bỏ sản phẩm gốc
+            similar_df = similar_df[similar_df['product_id'] != product_id]
+            
+            # Tính điểm nội dung = similarity * user_rating
+            similar_df['content_score'] = similar_df['similarity'] * similar_df['user_rating'] / 5.0
+            
+            similar_items = pd.concat([similar_items, similar_df])
+            
+        except Exception as e:
+            print(f"Error finding similar items for product {product_id}: {e}")
+    
+    # Loại bỏ các sản phẩm trùng lặp (lấy điểm cao nhất)
+    if not similar_items.empty:
+        recommendations = similar_items.groupby('product_id')['content_score'].max().reset_index()
+        
+        # Loại bỏ các sản phẩm người dùng đã đánh giá
+        rated_product_ids = set(ratings['product_id'])
+        recommendations = recommendations[~recommendations['product_id'].isin(rated_product_ids)]
+        
+        # Sắp xếp theo điểm giảm dần
+        recommendations = recommendations.sort_values(by='content_score', ascending=False).head(top_n)
+        
+        # Thêm thông tin chi tiết về sản phẩm
+        if not recommendations.empty:
+            recommendations = pd.merge(recommendations, product_details, on='product_id', how='left')
+            
+        return recommendations
+    else:
+        # Nếu không tìm thấy sản phẩm tương tự, trả về các sản phẩm phổ biến nhất
+        if 'rating' in product_details.columns:
+            return product_details.sort_values(by='rating', ascending=False).head(top_n)
+        else:
+            return product_details.head(top_n)
