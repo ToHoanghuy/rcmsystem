@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Recommendation Demo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.4.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+        }
+        .panel {
+            flex: 1;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .product-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .product-card {
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 3px;
+            width: calc(33% - 10px);
+            cursor: pointer;
+        }
+        .product-card:hover {
+            background-color: #f5f5f5;
+        }
+        .recommendation-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .rec-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .user-controls {
+            margin-bottom: 20px;
+        }
+        .actions {
+            margin-top: 10px;
+        }
+        button {
+            padding: 5px 10px;
+            margin-right: 5px;
+        }
+        .log-panel {
+            height: 150px;
+            overflow-y: auto;
+            background-color: #f5f5f5;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <h1>Real-time Recommendation Demo</h1>
+    
+    <div class="user-controls">
+        <label for="user-id">User ID:</label>
+        <input type="number" id="user-id" value="1">
+        <button id="connect-btn">Connect</button>
+        <button id="disconnect-btn" disabled>Disconnect</button>
+        <span id="connection-status">Disconnected</span>
+    </div>
+    
+    <div class="container">
+        <div class="panel">
+            <h2>Products</h2>
+            <div class="product-list" id="product-list">
+                <!-- Products will be loaded here -->
+                <div class="product-card" data-id="1">
+                    <h3>Product 1</h3>
+                    <p>This is product 1 description</p>
+                    <div class="actions">
+                        <button class="view-btn" data-id="1">View</button>
+                        <button class="cart-btn" data-id="1">Add to Cart</button>
+                        <button class="purchase-btn" data-id="1">Purchase</button>
+                    </div>
+                </div>
+                <!-- More products will be dynamically added -->
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Real-time Recommendations</h2>
+            <div class="recommendation-list" id="recommendation-list">
+                <!-- Recommendations will appear here -->
+                <div class="rec-item">
+                    <p>Connect a user to see real-time recommendations</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <h2>Event Log</h2>
+    <div class="log-panel" id="log-panel"></div>
+    
+    <script>
+        // Globals
+        let socket;
+        let connected = false;
+        let userId = 1;
+        const apiBaseUrl = 'http://localhost:5000'; // Change this to your server URL
+
+        // DOM Elements
+        const userIdInput = document.getElementById('user-id');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const connectionStatus = document.getElementById('connection-status');
+        const productList = document.getElementById('product-list');
+        const recommendationList = document.getElementById('recommendation-list');
+        const logPanel = document.getElementById('log-panel');
+
+        // Connect to Socket.IO server
+        function connectSocket() {
+            userId = parseInt(userIdInput.value);
+            if (!userId) {
+                logMessage('Please enter a valid user ID', 'error');
+                return;
+            }
+
+            try {
+                socket = io(apiBaseUrl);
+                
+                socket.on('connect', () => {
+                    logMessage(`Socket connected with ID: ${socket.id}`, 'info');
+                    
+                    // Register user ID
+                    socket.emit('register_user', { user_id: userId });
+                });
+                
+                socket.on('registration_success', (data) => {
+                    logMessage(`${data.message}`, 'success');
+                    connected = true;
+                    updateConnectionUI();
+                    
+                    // Load initial recommendations
+                    fetchRecommendations(userId);
+                });
+                
+                socket.on('registration_failed', (data) => {
+                    logMessage(`Registration failed: ${data.message}`, 'error');
+                    socket.disconnect();
+                });
+                
+                socket.on('disconnect', () => {
+                    logMessage('Socket disconnected', 'info');
+                    connected = false;
+                    updateConnectionUI();
+                });
+                
+                socket.on('realtime_recommendation', (data) => {
+                    logMessage(`Received real-time recommendations for user ${data.user_id}`, 'success');
+                    displayRecommendations(data.recommendations);
+                });
+                
+                socket.on('connect_error', (error) => {
+                    logMessage(`Connection error: ${error.message}`, 'error');
+                });
+                
+            } catch (error) {
+                logMessage(`Error connecting to socket: ${error.message}`, 'error');
+            }
+        }
+
+        // Disconnect from Socket.IO server
+        function disconnectSocket() {
+            if (socket) {
+                socket.disconnect();
+                logMessage('Disconnected from server', 'info');
+            }
+        }
+
+        // Update UI based on connection status
+        function updateConnectionUI() {
+            if (connected) {
+                connectionStatus.textContent = `Connected as User ${userId}`;
+                connectionStatus.style.color = 'green';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                connectionStatus.textContent = 'Disconnected';
+                connectionStatus.style.color = 'red';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        // Log message to console
+        function logMessage(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = type;
+            entry.textContent = `[${timestamp}] ${message}`;
+            logPanel.appendChild(entry);
+            logPanel.scrollTop = logPanel.scrollHeight;
+            console.log(`[${type}] ${message}`);
+        }
+
+        // Fetch product data
+        async function fetchProducts() {
+            try {
+                // In a real app, you would fetch products from an API
+                // This is a placeholder for demonstration
+                const dummyProducts = [];
+                for (let i = 1; i <= 12; i++) {
+                    dummyProducts.push({
+                        product_id: i,
+                        name: `Product ${i}`,
+                        description: `This is the description for product ${i}`,
+                        price: (Math.random() * 100).toFixed(2),
+                        rating: (Math.random() * 5).toFixed(1)
+                    });
+                }
+                displayProducts(dummyProducts);
+            } catch (error) {
+                logMessage(`Error fetching products: ${error.message}`, 'error');
+            }
+        }
+
+        // Display products in the UI
+        function displayProducts(products) {
+            productList.innerHTML = ''; // Clear existing products
+            
+            products.forEach(product => {
+                const card = document.createElement('div');
+                card.className = 'product-card';
+                card.dataset.id = product.product_id;
+                
+                card.innerHTML = `
+                    <h3>${product.name}</h3>
+                    <p>${product.description}</p>
+                    <p>Price: $${product.price}</p>
+                    <p>Rating: ${product.rating}/5</p>
+                    <div class="actions">
+                        <button class="view-btn" data-id="${product.product_id}">View</button>
+                        <button class="cart-btn" data-id="${product.product_id}">Add to Cart</button>
+                        <button class="purchase-btn" data-id="${product.product_id}">Purchase</button>
+                    </div>
+                `;
+                
+                productList.appendChild(card);
+            });
+            
+            // Add event handlers for buttons
+            document.querySelectorAll('.view-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => handleProductAction(e, 'view'));
+            });
+            
+            document.querySelectorAll('.cart-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => handleProductAction(e, 'add_to_cart'));
+            });
+            
+            document.querySelectorAll('.purchase-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => handleProductAction(e, 'purchase'));
+            });
+        }
+
+        // Handle product actions (view, add to cart, purchase)
+        async function handleProductAction(event, actionType) {
+            const productId = parseInt(event.target.dataset.id);
+            
+            if (!connected) {
+                logMessage('Please connect a user first', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${apiBaseUrl}/event`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        product_id: productId,
+                        event_type: actionType
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    logMessage(`Error: ${data.error}`, 'error');
+                } else {
+                    logMessage(`Event recorded: ${actionType} product ${productId}`, 'success');
+                    
+                    // If recommendations are included in the response and not sent via websocket, display them
+                    if (data.recommendations && !data.sent_via_socket) {
+                        displayRecommendations(data.recommendations);
+                    }
+                }
+                
+            } catch (error) {
+                logMessage(`Error recording event: ${error.message}`, 'error');
+            }
+        }
+
+        // Fetch recommendations from the API
+        async function fetchRecommendations(userId) {
+            try {
+                const response = await fetch(`${apiBaseUrl}/realtime-recommend?user_id=${userId}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    logMessage(`Error: ${data.error}`, 'error');
+                } else {
+                    logMessage('Loaded initial recommendations', 'info');
+                    displayRecommendations(data.recommendations);
+                }
+                
+            } catch (error) {
+                logMessage(`Error fetching recommendations: ${error.message}`, 'error');
+            }
+        }
+
+        // Display recommendations in the UI
+        function displayRecommendations(recommendations) {
+            recommendationList.innerHTML = ''; // Clear existing recommendations
+            
+            if (!recommendations || recommendations.length === 0) {
+                const item = document.createElement('div');
+                item.className = 'rec-item';
+                item.textContent = 'No recommendations available';
+                recommendationList.appendChild(item);
+                return;
+            }
+            
+            recommendations.forEach(rec => {
+                const item = document.createElement('div');
+                item.className = 'rec-item';
+                
+                // Create HTML content based on available properties
+                let content = '';
+                if (rec.name) {
+                    content += `<h3>${rec.name}</h3>`;
+                } else {
+                    content += `<h3>Product ${rec.product_id}</h3>`;
+                }
+                
+                if (rec.description) {
+                    content += `<p>${rec.description}</p>`;
+                }
+                
+                if (rec.price) {
+                    content += `<p>Price: $${rec.price}</p>`;
+                }
+                
+                if (rec.rating) {
+                    content += `<p>Rating: ${rec.rating}/5</p>`;
+                }
+                
+                if (rec.score) {
+                    content += `<p>Recommendation Score: ${parseFloat(rec.score).toFixed(2)}</p>`;
+                }
+                
+                if (rec.source) {
+                    content += `<p>Source: ${rec.source}</p>`;
+                }
+                
+                item.innerHTML = content;
+                recommendationList.appendChild(item);
+            });
+        }
+
+        // Event listeners
+        connectBtn.addEventListener('click', connectSocket);
+        disconnectBtn.addEventListener('click', disconnectSocket);
+
+        // Initialize
+        fetchProducts();
+        updateConnectionUI();
+    </script>
+</body>
+</html>

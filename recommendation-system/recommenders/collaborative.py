@@ -22,10 +22,22 @@ def train_collaborative_model(data, optimize_params=True):
         Tập dữ liệu kiểm tra
     predictions: list
         Các dự đoán trên tập kiểm tra
-    """
+    """    # Check and handle different column naming conventions
+    # Look for 'rating' column or alternatives like 'rating_x' or 'integrated_score'
+    rating_col = 'rating'
+    if rating_col not in data.columns:
+        if 'rating_x' in data.columns:
+            rating_col = 'rating_x'
+            print(f"Using '{rating_col}' column instead of 'rating'")
+        elif 'integrated_score' in data.columns:
+            rating_col = 'integrated_score'
+            print(f"Using '{rating_col}' column instead of 'rating'")
+        else:
+            raise ValueError("No suitable rating column found in the data")
+    
     # Cân bằng dữ liệu đánh giá trước khi huấn luyện mô hình
     # Xử lý vấn đề mất cân bằng giữa các rating cực trị (1 và 5)
-    rating_counts = data['rating'].value_counts().sort_index()
+    rating_counts = data[rating_col].value_counts().sort_index()
     print(f"Original rating distribution: {rating_counts.to_dict()}")
     
     # Cải thiện: Nếu có quá nhiều đánh giá cực trị, thực hiện lấy mẫu để cân bằng dữ liệu
@@ -35,14 +47,17 @@ def train_collaborative_model(data, optimize_params=True):
         # Nếu số lượng rating 5.0 nhiều hơn 3 lần rating 1.0
         if max_rating_count > 3 * min_rating_count and min_rating_count > 0:
             # Lấy mẫu ngẫu nhiên từ các đánh giá 5.0
-            rating_5_samples = data[data['rating'] == 5.0].sample(n=min(max_rating_count, 3 * min_rating_count), random_state=42)
+            rating_5_samples = data[data[rating_col] == 5.0].sample(n=min(max_rating_count, 3 * min_rating_count), random_state=42)
             # Kết hợp với các đánh giá khác
-            other_ratings = data[data['rating'] != 5.0]
+            other_ratings = data[data[rating_col] != 5.0]
             data = pd.concat([other_ratings, rating_5_samples])
-            print(f"Balanced high rating samples to reduce bias. New count: {len(data[data['rating'] == 5.0])}")
+            print(f"Balanced high rating samples to reduce bias. New count: {len(data[data[rating_col] == 5.0])}")
     
     reader = Reader(rating_scale=(1, 5))
-    dataset = Dataset.load_from_df(data[['user_id', 'product_id', 'rating']], reader)
+    # Create a copy of the DataFrame with standard column names for Surprise
+    surprise_data = data.copy()
+    surprise_data['rating'] = surprise_data[rating_col]
+    dataset = Dataset.load_from_df(surprise_data[['user_id', 'product_id', 'rating']], reader)
     
     # Thêm trọng số ngược với tần suất để tăng ảnh hưởng của rating hiếm
     trainset, testset = train_test_split(dataset, test_size=0.2, random_state=42)

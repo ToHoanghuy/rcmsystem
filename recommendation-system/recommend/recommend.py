@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from recommenders.collaborative import collaborative_filtering
 from recommenders.content_based import recommend_content_based
 from recommenders.event_based import recommend_based_on_events, recommend_based_on_events_advanced
-from recommenders.hybrid import hybrid_recommendations, weighted_hybrid, adaptive_hybrid
+from recommenders.hybrid import hybrid_recommendations, weighted_hybrid, adaptive_hybrid_recommendations as adaptive_hybrid
 from config.config import get_config
 from models.evaluation import evaluate_recommendations
 

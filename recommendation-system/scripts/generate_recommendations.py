@@ -1,6 +1,6 @@
 import pandas as pd
 import logging
-from recommenders.hybrid import hybrid_recommendations, adaptive_hybrid
+from recommenders.hybrid import hybrid_recommendations, adaptive_hybrid_recommendations as adaptive_hybrid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

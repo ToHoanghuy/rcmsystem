@@ -128,6 +128,11 @@ def load_product_details(filepath):
     Load thông tin chi tiết về sản phẩm
     """
     products = load_data(filepath)
+    
+    # Check if 'name' column exists and rename it to 'product_name' if needed
+    if 'name' in products.columns and 'product_name' not in products.columns:
+        products['product_name'] = products['name']
+    
     # Đảm bảo có các cột cần thiết
     required_columns = ['product_id', 'product_name']
     missing_columns = [col for col in required_columns if col not in products.columns]
