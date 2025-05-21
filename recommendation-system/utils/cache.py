@@ -156,7 +156,6 @@ class RecommendationCache:
             del self.cache_data[key]
         
         return len(expired_keys)
-    
     def get_cache_stats(self):
         """
         Lấy thông tin thống kê về cache
@@ -183,6 +182,51 @@ class RecommendationCache:
             'max_size': self.max_size,
             'cache_expiry': self.cache_expiry
         }
+    def get(self, cache_key):
+        """
+        Lấy kết quả từ cache dựa trên khóa cache
+        
+        Parameters:
+        -----------
+        cache_key: str
+            Khóa cache
+            
+        Returns:
+        --------
+        object or None
+            Kết quả cache nếu có và chưa hết hạn, None nếu không có
+        """
+        # Kiểm tra xem khóa có trong cache không
+        if cache_key in self.cache_data:
+            timestamp, data = self.cache_data[cache_key]
+            # Kiểm tra xem cache đã hết hạn chưa
+            if time.time() - timestamp < self.cache_expiry:
+                return data
+        return None
+        
+    def set(self, cache_key, value):
+        """
+        Lưu trữ giá trị vào cache
+        
+        Parameters:
+        -----------
+        cache_key: str
+            Khóa cache
+        value: object
+            Giá trị cần lưu vào cache
+            
+        Returns:
+        --------
+        None
+        """
+        # Nếu cache đã đầy, xóa một mục ngẫu nhiên
+        if len(self.cache_data) >= self.max_size:
+            # Xóa mục cũ nhất
+            oldest_key = min(self.cache_data.keys(), key=lambda k: self.cache_data[k][0])
+            del self.cache_data[oldest_key]
+            
+        # Lưu trữ kết quả vào cache
+        self.cache_data[cache_key] = (time.time(), value)
 
 
 # Khởi tạo cache toàn cục

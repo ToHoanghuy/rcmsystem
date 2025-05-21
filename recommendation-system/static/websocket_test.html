@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Recommendation Test</title>
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .panel {
+            flex: 1;
+            min-width: 300px;
+            margin: 10px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .log-panel {
+            background-color: #f8f9fa;
+            height: 300px;
+            overflow-y: auto;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+            margin-top: 10px;
+        }
+        .action-button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .action-button.secondary {
+            background-color: #2196F3;
+        }
+        .action-button.danger {
+            background-color: #f44336;
+        }
+        .event-button {
+            background-color: #ff9800;
+            margin: 5px;
+        }
+        .connection {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .connected {
+            background-color: #dff0d8;
+            border: 1px solid #d6e9c6;
+        }
+        .disconnected {
+            background-color: #f2dede;
+            border: 1px solid #ebccd1;
+        }
+        .card {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .rating {
+            color: #ff9800;
+            font-size: 18px;
+        }
+        input, select {
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .log-info {
+            color: #31708f;
+        }
+        .log-success {
+            color: #3c763d;
+        }
+        .log-error {
+            color: #a94442;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Recommendation Test</h1>
+    
+    <div class="container">
+        <div class="panel">
+            <h2>Connection</h2>
+            <div class="connection" id="connection-status">
+                <span>Disconnected</span>
+            </div>
+            
+            <label for="user-id">User ID:</label>
+            <input type="text" id="user-id" value="1">
+            
+            <div>
+                <button id="connect-btn" class="action-button">Connect</button>
+                <button id="disconnect-btn" class="action-button danger">Disconnect</button>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <h2>Send Event</h2>
+            <label for="location-id">Location ID:</label>
+            <input type="text" id="location-id" value="101">
+            
+            <label for="event-type">Event Type:</label>
+            <select id="event-type">
+                <option value="view">View</option>
+                <option value="click">Click</option>
+                <option value="book">Book</option>
+                <option value="rate">Rate</option>
+                <option value="search">Search</option>
+                <option value="favorite">Favorite</option>
+            </select>
+            
+            <div id="rating-container" style="display: none;">
+                <label for="rating">Rating:</label>
+                <select id="rating">
+                    <option value="1">1 Star</option>
+                    <option value="2">2 Stars</option>
+                    <option value="3">3 Stars</option>
+                    <option value="4">4 Stars</option>
+                    <option value="5">5 Stars</option>
+                </select>
+            </div>
+            
+            <div>
+                <button id="send-event-btn" class="action-button secondary">Send Event</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="panel">
+            <h2>Recommendations</h2>
+            <div id="recommendations-container"></div>
+        </div>
+        
+        <div class="panel">
+            <h2>Log</h2>
+            <div class="log-panel" id="log"></div>
+            <button id="clear-log-btn" class="action-button danger">Clear Log</button>
+        </div>
+    </div>
+    
+    <script>
+        // DOM Elements
+        const userIdInput = document.getElementById('user-id');
+        const locationIdInput = document.getElementById('location-id');
+        const eventTypeSelect = document.getElementById('event-type');
+        const ratingSelect = document.getElementById('rating');
+        const ratingContainer = document.getElementById('rating-container');
+        const connectionStatus = document.getElementById('connection-status');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const sendEventBtn = document.getElementById('send-event-btn');
+        const recommendationsContainer = document.getElementById('recommendations-container');
+        const logContainer = document.getElementById('log');
+        const clearLogBtn = document.getElementById('clear-log-btn');
+        
+        // Socket
+        let socket;
+        const apiBaseUrl = window.location.origin; // Same domain
+        let isConnected = false;
+        
+        // Update connection status UI
+        function updateConnectionStatus(connected) {
+            isConnected = connected;
+            connectionStatus.className = connected ? 'connection connected' : 'connection disconnected';
+            connectionStatus.innerHTML = connected ? 
+                `<span>Connected as User ID: ${userIdInput.value}</span>` : 
+                '<span>Disconnected</span>';
+            
+            connectBtn.disabled = connected;
+            disconnectBtn.disabled = !connected;
+            sendEventBtn.disabled = !connected;
+        }
+        
+        // Log message
+        function logMessage(message, type = 'info') {
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.innerHTML = `<span>[${new Date().toLocaleTimeString()}]</span> ${message}`;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        
+        // Display recommendations
+        function displayRecommendations(recommendations) {
+            recommendationsContainer.innerHTML = '';
+            
+            if (!recommendations || recommendations.length === 0) {
+                recommendationsContainer.innerHTML = '<p>No recommendations available</p>';
+                return;
+            }
+            
+            recommendations.forEach((rec, index) => {
+                const recCard = document.createElement('div');
+                recCard.className = 'card';
+                
+                const name = rec.name || rec.location_name || `Location ${rec.location_id || rec.product_id}`;
+                const score = rec.score ? Math.round(rec.score * 100) / 100 : '';
+                
+                recCard.innerHTML = `
+                    <h3>${index + 1}. ${name}</h3>
+                    <p>ID: ${rec.location_id || rec.product_id}</p>
+                    ${score ? `<p>Score: <span class="rating">${score}</span></p>` : ''}
+                `;
+                
+                recommendationsContainer.appendChild(recCard);
+            });
+        }
+        
+        // Connect to socket
+        connectBtn.addEventListener('click', () => {
+            const userId = userIdInput.value.trim();
+            
+            if (!userId) {
+                logMessage('Please enter a valid User ID', 'error');
+                return;
+            }
+            
+            logMessage('Connecting to server...', 'info');
+            
+            try {
+                socket = io(apiBaseUrl);
+                
+                socket.on('connect', () => {
+                    logMessage(`Socket connected with ID: ${socket.id}`, 'info');
+                    
+                    // Register user ID
+                    socket.emit('register_user', { user_id: userId });
+                });
+                
+                socket.on('registration_success', (data) => {
+                    logMessage(`${data.message}`, 'success');
+                    updateConnectionStatus(true);
+                    
+                    // Get initial recommendations
+                    fetch(`${apiBaseUrl}/api/recommend?user_id=${userId}&case=hybrid`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success && data.recommendations) {
+                                displayRecommendations(data.recommendations);
+                                logMessage('Loaded initial recommendations', 'success');
+                            }
+                        })
+                        .catch(error => {
+                            logMessage(`Error fetching recommendations: ${error}`, 'error');
+                        });
+                });
+                
+                socket.on('registration_failed', (data) => {
+                    logMessage(`Registration failed: ${data.message}`, 'error');
+                    socket.disconnect();
+                });
+                
+                socket.on('realtime_recommendation', (data) => {
+                    logMessage(`Received real-time recommendations for user ${data.user_id}`, 'success');
+                    displayRecommendations(data.recommendations);
+                });
+                
+                socket.on('disconnect', () => {
+                    logMessage('Socket disconnected', 'info');
+                    updateConnectionStatus(false);
+                });
+                
+                socket.on('connect_error', (error) => {
+                    logMessage(`Connection error: ${error.message}`, 'error');
+                    updateConnectionStatus(false);
+                });
+                
+            } catch (error) {
+                logMessage(`Socket connection error: ${error.message}`, 'error');
+            }
+        });
+        
+        // Disconnect from socket
+        disconnectBtn.addEventListener('click', () => {
+            if (socket) {
+                socket.disconnect();
+                logMessage('Disconnected from server', 'info');
+                updateConnectionStatus(false);
+            }
+        });
+        
+        // Send event
+        sendEventBtn.addEventListener('click', () => {
+            if (!socket || !isConnected) {
+                logMessage('Socket not connected', 'error');
+                return;
+            }
+            
+            const userId = userIdInput.value.trim();
+            const locationId = locationIdInput.value.trim();
+            const eventType = eventTypeSelect.value;
+            
+            if (!userId || !locationId) {
+                logMessage('User ID and Location ID are required', 'error');
+                return;
+            }
+            
+            // Prepare event data
+            const eventData = {
+                user_id: userId,
+                location_id: locationId,
+                event_type: eventType,
+                data: {}
+            };
+            
+            // Add rating if event type is 'rate'
+            if (eventType === 'rate') {
+                eventData.data.rating = parseFloat(ratingSelect.value);
+            }
+            
+            logMessage(`Sending ${eventType} event for location ${locationId}...`, 'info');
+            
+            // Send event via API
+            fetch(`${apiBaseUrl}/api/track`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(eventData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    logMessage(`Event tracked successfully`, 'success');
+                } else {
+                    logMessage(`Error tracking event: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                logMessage(`Error sending event: ${error}`, 'error');
+            });
+        });
+        
+        // Show/hide rating field based on event type
+        eventTypeSelect.addEventListener('change', () => {
+            ratingContainer.style.display = eventTypeSelect.value === 'rate' ? 'block' : 'none';
+        });
+        
+        // Clear log
+        clearLogBtn.addEventListener('click', () => {
+            logContainer.innerHTML = '';
+        });
+        
+        // Initialize UI
+        updateConnectionStatus(false);
+        disconnectBtn.disabled = true;
+        sendEventBtn.disabled = true;
+        
+        // Log initialization
+        logMessage('WebSocket test client initialized', 'info');
+    </script>
+</body>
+</html>

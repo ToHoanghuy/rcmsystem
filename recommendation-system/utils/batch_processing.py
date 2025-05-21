@@ -185,9 +185,16 @@ def batch_predict(model, user_ids, product_ids, batch_size=1000):
             
             for uid, pid in batch_pairs:
                 try:
-                    pred = model.predict(uid, pid)
+                    try:
+                        # Thử với kiểu dữ liệu gốc
+                        pred = model.predict(uid, pid)
+                    except (ValueError, TypeError) as e:
+                        # Nếu lỗi, thử với dạng chuỗi
+                        print(f"Trying batch prediction with string IDs: {e}")
+                        pred = model.predict(str(uid), str(pid))
                     batch_predictions.append((uid, pid, pred.est))
                 except Exception as e:
+                    print(f"Failed to predict for user {uid} and product {pid}: {e}")
                     # Bỏ qua nếu không dự đoán được
                     pass
             

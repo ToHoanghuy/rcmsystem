@@ -3,6 +3,11 @@ import pandas as pd
 from recommenders.content_based import get_similar_products
 from scipy.sparse.linalg import svds
 from sklearn.metrics.pairwise import cosine_similarity
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def adaptive_hybrid_recommendations(collaborative_model, content_model_data, user_id, product_details, 
                                    user_events=None, top_n=10):
@@ -60,15 +65,20 @@ def adaptive_hybrid_recommendations(collaborative_model, content_model_data, use
     content_weight = max(0, min(1, content_weight))
     
     print(f"Adaptive weights: Collaborative = {collab_weight:.2f}, Content = {content_weight:.2f}")
-    
-    # Tính điểm hybrid
+      # Tính điểm hybrid
     product_scores = {}
     for product_id in all_products:
         # Điểm collaborative filtering
         cf_score = 3.0  # Giá trị mặc định
         try:
-            cf_score = collaborative_model.predict(uid=user_id, iid=product_id).est
-        except:
+            try:
+                cf_score = collaborative_model.predict(uid=user_id, iid=product_id).est
+            except (ValueError, TypeError) as e:
+                # Nếu lỗi kiểu dữ liệu, thử với dạng chuỗi
+                print(f"Converting IDs to string: {e}")
+                cf_score = collaborative_model.predict(uid=str(user_id), iid=str(product_id)).est
+        except Exception as e:
+            print(f"Hybrid prediction failed for user {user_id}, product {product_id}: {e}")
             pass
         
         # Điểm content-based
@@ -355,7 +365,6 @@ def context_aware_hybrid_recommendations(collaborative_model, content_model_data
     
     selected_items = []
     remaining_items = sorted(product_scores.items(), key=lambda x: x[1], reverse=True)
-    
     while len(selected_items) < top_n and remaining_items:
         if not selected_items:
             # Chọn item đầu tiên là item có điểm số cao nhất
@@ -603,52 +612,52 @@ def personalized_matrix_factorization_hybrid(collaborative_model, content_model_
 
 def calculate_diversity(product_ids, id_to_index, similarity_matrix):
     """
-    Tính độ đa dạng của một danh sách sản phẩm dựa trên ma trận tương đồng
+    Tính độ đa dạng của một tập các sản phẩm dựa trên ma trận độ tương đồng
+    
+    Độ đa dạng được tính dựa trên độ khác biệt trung bình giữa các cặp sản phẩm
+    Giá trị càng cao nghĩa là tập sản phẩm càng đa dạng (càng khác biệt nhau)
     
     Parameters:
     -----------
     product_ids: list
-        Danh sách ID sản phẩm
+        Danh sách ID của các sản phẩm cần tính độ đa dạng
     id_to_index: dict
-        Dictionary ánh xạ từ ID sản phẩm sang chỉ số trong ma trận tương đồng
+        Dictionary ánh xạ từ product_id sang index trong ma trận tương đồng
     similarity_matrix: numpy.ndarray
-        Ma trận tương đồng giữa các sản phẩm
+        Ma trận độ tương đồng giữa các sản phẩm
         
     Returns:
     --------
-    float
-        Giá trị độ đa dạng trong khoảng [0, 1], càng cao càng đa dạng
+    diversity_score: float
+        Điểm đa dạng của tập sản phẩm, trong khoảng [0, 1]
+        0 = tất cả sản phẩm giống nhau, 1 = tất cả sản phẩm hoàn toàn khác nhau
     """
-    if not product_ids or len(product_ids) <= 1:
-        return 1.0
-        
-    # Lọc ra những product_id có trong id_to_index
     valid_ids = [pid for pid in product_ids if pid in id_to_index]
     
-    if len(valid_ids) <= 1:
-        return 1.0
+    if len(valid_ids) < 2:
+        return 0.0
     
+    # Lấy các chỉ số tương ứng trong ma trận tương đồng
     indices = [id_to_index[pid] for pid in valid_ids]
     
-    # Tính tổng độ tương đồng giữa tất cả các cặp sản phẩm
-    similarity_sum = 0
-    pair_count = 0
+    # Tính tổng độ tương đồng giữa các cặp sản phẩm
+    total_similarity = 0.0
+    count = 0
     
-    for i in range(len(indices)):
-        for j in range(i + 1, len(indices)):
-            similarity_sum += similarity_matrix[indices[i], indices[j]]
-            pair_count += 1
+    for i, idx1 in enumerate(indices):
+        for j, idx2 in enumerate(indices):
+            if i < j:  # Chỉ tính một lần cho mỗi cặp
+                total_similarity += similarity_matrix[idx1, idx2]
+                count += 1
     
-    # Tính độ tương đồng trung bình
-    if pair_count == 0:
-        return 1.0
-        
-    avg_similarity = similarity_sum / pair_count
-    
-    # Độ đa dạng = 1 - độ tương đồng trung bình
-    diversity = 1.0 - avg_similarity
-    
-    return diversity
+    if count > 0:
+        # Tính độ tương đồng trung bình
+        avg_similarity = total_similarity / count
+        # Chuyển từ độ tương đồng sang độ đa dạng (đảo ngược)
+        diversity_score = 1.0 - avg_similarity
+        return diversity_score
+    else:
+        return 0.0
 
 def hybrid_recommendations(collaborative_model, content_model_data, user_id, product_details, method="context_aware", top_n=10, user_events=None, user_context=None):
     """

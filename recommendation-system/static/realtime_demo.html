@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
+<head>    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Recommendation Demo</title>
+    <title>Đề xuất địa điểm du lịch theo thời gian thực</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.4.1/socket.io.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -26,36 +27,83 @@
         .product-list {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 15px;
         }
         .product-card {
             border: 1px solid #ddd;
-            padding: 10px;
-            border-radius: 3px;
-            width: calc(33% - 10px);
+            padding: 15px;
+            border-radius: 5px;
+            width: calc(33% - 15px);
             cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            position: relative;
         }
         .product-card:hover {
-            background-color: #f5f5f5;
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .product-card::after {
+            content: "📍"; /* Map pin emoji */
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            font-size: 16px;
+            opacity: 0.7;
+        }
+        .product-card:hover::after {
+            opacity: 1;
         }
         .recommendation-list {
-            max-height: 500px;
+            max-height: 600px;
             overflow-y: auto;
         }
         .rec-item {
-            margin-bottom: 10px;
-            padding: 10px;
-            border-bottom: 1px solid #eee;
+            margin-bottom: 15px;
+            padding: 12px;
+            border-radius: 5px;
+            border: 1px solid #eee;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .rec-item:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+            border-color: #ddd;
+        }
+        .rec-item[style*="cursor: pointer"]::after {
+            content: "📍"; /* Map pin emoji */
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            font-size: 16px;
+            opacity: 0.7;
+        }
+        .rec-item:hover[style*="cursor: pointer"]::after {
+            opacity: 1;
         }
         .user-controls {
             margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            border: 1px solid #eee;
         }
         .actions {
             margin-top: 10px;
         }
         button {
-            padding: 5px 10px;
+            padding: 8px 12px;
             margin-right: 5px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            background: #f5f5f5;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #e9e9e9;
         }
         .log-panel {
             height: 150px;
@@ -64,53 +112,92 @@
             padding: 10px;
             font-family: monospace;
             font-size: 12px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
         }
         .success { color: green; }
         .error { color: red; }
         .info { color: blue; }
+        .category {
+            display: inline-block;
+            background-color: #f0f8ff;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            color: #1e90ff;
+            margin: 5px 0;
+        }
+        .address {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        h3 {
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+        .view-btn {
+            background-color: #e3f2fd;
+            color: #0d47a1;
+        }
+        .cart-btn {
+            background-color: #e8f5e9;
+            color: #1b5e20;
+        }
+        .purchase-btn {
+            background-color: #fff3e0;
+            color: #e65100;
+        }
+        .view-btn:hover {
+            background-color: #bbdefb;
+        }
+        .cart-btn:hover {
+            background-color: #c8e6c9;
+        }
+        .purchase-btn:hover {
+            background-color: #ffe0b2;
+        }
+        #map {
+            height: 300px;
+            margin-top: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
-<body>
-    <h1>Real-time Recommendation Demo</h1>
+<body>    <h1>Đề xuất địa điểm du lịch theo thời gian thực</h1>
     
     <div class="user-controls">
-        <label for="user-id">User ID:</label>
-        <input type="number" id="user-id" value="1">
-        <button id="connect-btn">Connect</button>
-        <button id="disconnect-btn" disabled>Disconnect</button>
-        <span id="connection-status">Disconnected</span>
+        <label for="user-id">ID Người dùng:</label>
+        <input type="number" id="user-id" value="1">        <button id="connect-btn">Kết nối</button>
+        <button id="disconnect-btn" disabled>Ngắt kết nối</button>
+        <span id="connection-status">Đã ngắt kết nối</span>
     </div>
     
-    <div class="container">
-        <div class="panel">
-            <h2>Products</h2>
+    <div class="container">        <div class="panel">
+            <h2>Các địa điểm</h2>
             <div class="product-list" id="product-list">
                 <!-- Products will be loaded here -->
                 <div class="product-card" data-id="1">
-                    <h3>Product 1</h3>
-                    <p>This is product 1 description</p>
-                    <div class="actions">
-                        <button class="view-btn" data-id="1">View</button>
-                        <button class="cart-btn" data-id="1">Add to Cart</button>
-                        <button class="purchase-btn" data-id="1">Purchase</button>
-                    </div>
+                    <h3>Đang tải dữ liệu...</h3>
                 </div>
                 <!-- More products will be dynamically added -->
             </div>
         </div>
         
         <div class="panel">
-            <h2>Real-time Recommendations</h2>
+            <h2>Đề xuất theo thời gian thực</h2>
             <div class="recommendation-list" id="recommendation-list">
                 <!-- Recommendations will appear here -->
                 <div class="rec-item">
-                    <p>Connect a user to see real-time recommendations</p>
+                    <p>Kết nối người dùng để xem đề xuất theo thời gian thực</p>
                 </div>
             </div>
         </div>
-    </div>
+    </div>    <h2>Bản đồ địa điểm</h2>
+    <div id="map"></div>
     
-    <h2>Event Log</h2>
+    <h2>Nhật ký sự kiện</h2>
     <div class="log-panel" id="log-panel"></div>
     
     <script>
@@ -133,7 +220,7 @@
         function connectSocket() {
             userId = parseInt(userIdInput.value);
             if (!userId) {
-                logMessage('Please enter a valid user ID', 'error');
+                logMessage('Vui lòng nhập ID người dùng hợp lệ', 'error');
                 return;
             }
 
@@ -141,7 +228,7 @@
                 socket = io(apiBaseUrl);
                 
                 socket.on('connect', () => {
-                    logMessage(`Socket connected with ID: ${socket.id}`, 'info');
+                    logMessage(`Đã kết nối socket với ID: ${socket.id}`, 'info');
                     
                     // Register user ID
                     socket.emit('register_user', { user_id: userId });
@@ -157,27 +244,27 @@
                 });
                 
                 socket.on('registration_failed', (data) => {
-                    logMessage(`Registration failed: ${data.message}`, 'error');
+                    logMessage(`Đăng ký không thành công: ${data.message}`, 'error');
                     socket.disconnect();
                 });
                 
                 socket.on('disconnect', () => {
-                    logMessage('Socket disconnected', 'info');
+                    logMessage('Socket đã ngắt kết nối', 'info');
                     connected = false;
                     updateConnectionUI();
                 });
                 
                 socket.on('realtime_recommendation', (data) => {
-                    logMessage(`Received real-time recommendations for user ${data.user_id}`, 'success');
+                    logMessage(`Đã nhận đề xuất theo thời gian thực cho người dùng ${data.user_id}`, 'success');
                     displayRecommendations(data.recommendations);
                 });
                 
                 socket.on('connect_error', (error) => {
-                    logMessage(`Connection error: ${error.message}`, 'error');
+                    logMessage(`Lỗi kết nối: ${error.message}`, 'error');
                 });
                 
             } catch (error) {
-                logMessage(`Error connecting to socket: ${error.message}`, 'error');
+                logMessage(`Lỗi kết nối socket: ${error.message}`, 'error');
             }
         }
 
@@ -185,19 +272,18 @@
         function disconnectSocket() {
             if (socket) {
                 socket.disconnect();
-                logMessage('Disconnected from server', 'info');
+                logMessage('Đã ngắt kết nối từ máy chủ', 'info');
             }
         }
 
         // Update UI based on connection status
         function updateConnectionUI() {
-            if (connected) {
-                connectionStatus.textContent = `Connected as User ${userId}`;
+            if (connected) {                connectionStatus.textContent = `Đã kết nối với người dùng ${userId}`;
                 connectionStatus.style.color = 'green';
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
             } else {
-                connectionStatus.textContent = 'Disconnected';
+                connectionStatus.textContent = 'Đã ngắt kết nối';
                 connectionStatus.style.color = 'red';
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
@@ -218,19 +304,314 @@
         // Fetch product data
         async function fetchProducts() {
             try {
-                // In a real app, you would fetch products from an API
-                // This is a placeholder for demonstration
-                const dummyProducts = [];
-                for (let i = 1; i <= 12; i++) {
-                    dummyProducts.push({
-                        product_id: i,
-                        name: `Product ${i}`,
-                        description: `This is the description for product ${i}`,
-                        price: (Math.random() * 100).toFixed(2),
-                        rating: (Math.random() * 5).toFixed(1)
-                    });
-                }
-                displayProducts(dummyProducts);
+                // Real location data from the provided JSON
+                const locationData = {
+                    "isSuccess": true,
+                    "data": {
+                        "data": [
+                            {
+                                "category": {
+                                    "id": "hotel",
+                                    "name": "Khách sạn"
+                                },
+                                "_id": "6704f3650722c4f99305dc5f",
+                                "ownerId": "6704df9d3d81e2f463846c27",
+                                "name": "Quán Cafe Sáng Tạo",
+                                "description": "Quán cafe với không gian sáng tạo, lý tưởng cho làm việc và gặp gỡ bạn bè.",
+                                "rating": 3.7,
+                                "image": [
+                                    {
+                                        "_id": "6826442d8d082831a30f7945",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735585136/travel-social/file-1735585106495-pew-nguyen-3sXuWhKZVeg-unsplash.jpg.jpg",
+                                        "publicId": "travel-social/file-1735585106495-pew-nguyen-3sXuWhKZVeg-unsplash.jpg"
+                                    }
+                                ],
+                                "address": "789 Đường Lê Văn Sỹ, Hà Nội",
+                                "dateCreated": "2024-10-08T03:00:00.000Z",
+                                "slug": "quan-cafe-sang-tao-789-uong-le-van-sy-ha-noi",
+                                "numberOfRating": 11,
+                                "status": "active",
+                                "latitude": 21.028511,
+                                "longitude": 105.804817,
+                                "minPrice": 200000,
+                                "province": "Hà Nội"
+                            },
+                            {
+                                "category": {
+                                    "id": "hotel",
+                                    "name": "khách sạn"
+                                },
+                                "_id": "6704f3650722c4f99305dc5d",
+                                "ownerId": "6729d0e8dda9481629a2a2e9",
+                                "name": "Khách sạn Hương Việt",
+                                "description": "Nhà hàng phục vụ các món ăn truyền thống Việt Nam, không gian ấm cúng.",
+                                "rating": 3.8,
+                                "image": [
+                                    {
+                                        "_id": "6826442d8d082831a30f7946",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735586344/travel-social/file-1735586315301-3_%20%281%29.jpg.jpg",
+                                        "publicId": "travel-social/file-1735586315301-3_ (1).jpg"
+                                    },
+                                    {
+                                        "_id": "6826442d8d082831a30f7947",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735581647/travel-social/file-1735581614030-ystallonne-alves-U_g9ZCqKAPA-unsplash.jpg.jpg",
+                                        "publicId": "travel-social/file-1735586315301-3_ (1).jpg"
+                                    }
+                                ],
+                                "address": "123 Đường Trần Hưng Đạo, TP.HCM",
+                                "dateCreated": "2024-10-08T03:00:00.000Z",
+                                "slug": "nha-hang-huong-viet-123-uong-tran-hung-ao-tphcm",
+                                "numberOfRating": 11,
+                                "status": "active",
+                                "province": "TP.HCM",
+                                "minPrice": 300000,
+                                "latitude": 10.776889,
+                                "longitude": 106.700806
+                            },
+                            {
+                                "category": {
+                                    "id": "hotel",
+                                    "name": "Nhà hàng"
+                                },
+                                "numberOfRating": 0,
+                                "_id": "6704f3650722c4f99305dc5e",
+                                "ownerId": "6704df9d3d81e2f463846c21",
+                                "name": "Khách Sạn Biển Xanh",
+                                "description": "Khách sạn ven biển với phòng nghỉ sang trọng và dịch vụ tuyệt vời.",
+                                "rating": 4,
+                                "image": [
+                                    {
+                                        "_id": "6826442d8d082831a30f7948",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735585013/travel-social/file-1735584983393-simply-mersah-f9VRmJ-eAik-unsplash.jpg.jpg"
+                                    }
+                                ],
+                                "address": "456 Đường Biển, Nha Trang",
+                                "dateCreated": "2024-10-08T03:00:00.000Z",
+                                "slug": "khach-san-bien-xanh-456-uong-bien-nha-trang",
+                                "status": "active",
+                                "latitude": 12.2451,
+                                "longitude": 109.1943,
+                                "province": "Khánh Hòa",
+                                "minPrice": 200000
+                            },
+                            {
+                                "category": {
+                                    "id": "hotel",
+                                    "name": "Nhà hàng"
+                                },
+                                "numberOfRating": 0,
+                                "_id": "6704f3650722c4f99305dc60",
+                                "ownerId": "6704df9d3d81e2f463846c21",
+                                "name": "Khách sạn Phố Cổ",
+                                "description": "Nhà hàng với các món ăn đặc sản miền Bắc, không gian trang nhã.",
+                                "rating": 4,
+                                "image": [
+                                    {
+                                        "_id": "6826442d8d082831a30f7949",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735585010/travel-social/file-1735584979636-alka-jha-lOxVZQc0W0U-unsplash.jpg.jpg"
+                                    }
+                                ],
+                                "address": "321 Đường Hàng Bông, Hà Nội",
+                                "dateCreated": "2024-10-08T03:00:00.000Z",
+                                "slug": "nha-hang-pho-co-321-uong-hang-bong-ha-noi",
+                                "status": "active",
+                                "latitude": 21.0251,
+                                "longitude": 105.8421,
+                                "minPrice": 260000,
+                                "province": "Hà Nội"
+                            },
+                            {
+                                "category": {
+                                    "id": "hotel",
+                                    "name": "Khách sạn"
+                                },
+                                "numberOfRating": 0,
+                                "_id": "6704f3650722c4f99305dc61",
+                                "ownerId": "6704df9d3d81e2f463846c27",
+                                "name": "Khách Sạn Mặt Trời",
+                                "description": "Khách sạn cao cấp với dịch vụ spa và hồ bơi sang trọng.",
+                                "rating": 5,
+                                "image": [
+                                    {
+                                        "_id": "6826442d8d082831a30f794a",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735585018/travel-social/file-1735584986518-tu-tran-anh-zfJ0U9MhTUA-unsplash.jpg.jpg"
+                                    }
+                                ],
+                                "address": "654 Đường Nguyễn Văn Linh, Đà Nẵng",
+                                "dateCreated": "2024-10-08T03:00:00.000Z",
+                                "slug": "khach-san-mat-troi-654-uong-nguyen-van-linh-a-nang",
+                                "status": "active",
+                                "latitude": 16.0544,
+                                "longitude": 108.2022,
+                                "minPrice": 400000,
+                                "province": "Đà Nẵng"
+                            },
+                            {
+                                "category": {
+                                    "id": "coffee-shop",
+                                    "name": "Quán cafe"
+                                },
+                                "_id": "6704f3650722c4f99305dc62",
+                                "ownerId": "6704df9d3d81e2f463846c21",
+                                "name": "Khách Sạn Bên Sông",
+                                "description": "Quán cafe yên tĩnh bên sông, lý tưởng để thư giãn và đọc sách.",
+                                "rating": 4,
+                                "image": [
+                                    {
+                                        "_id": "6826442d8d082831a30f794b",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735586343/travel-social/file-1735586316946-5_.jpg.jpg",
+                                        "publicId": "travel-social/file-1735586316946-5_.jpg"
+                                    }
+                                ],
+                                "address": "135 Đường Bến Vân Đồn, TP.HCM",
+                                "dateCreated": "2024-10-08T03:00:00.000Z",
+                                "slug": "cafe-ben-song-135-uong-ben-van-on-tphcm",
+                                "status": "active",
+                                "numberOfRating": 2
+                            },
+                            {
+                                "category": {
+                                    "id": "guest home",
+                                    "cateName": "Quán cafe"
+                                },
+                                "numberOfRating": 0,
+                                "_id": "6719247c456a0d466dc2be77",
+                                "ownerId": "671917a9dba9bb66474be6f4",
+                                "name": "Nhà nghỉ six",
+                                "description": "Quán cafe với không gian sáng tạo, lý tưởng cho làm việc và gặp gỡ bạn…",
+                                "rating": 0,
+                                "image": [
+                                    {
+                                        "_id": "6826442d8d082831a30f794c",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735586343/travel-social/file-1735586313501-1_%20%281%29.jpg.jpg",
+                                        "publicId": "travel-social/file-1735586313501-1_ (1).jpg"
+                                    }
+                                ],
+                                "address": "789 Đường Lê Văn Sỹ, Hà Nội",
+                                "dateCreated": "2024-10-23T16:29:48.970Z",
+                                "__v": 0,
+                                "slug": "six-coffee-789-uong-le-van-sy-ha-noi",
+                                "status": "active"
+                            },
+                            {
+                                "category": {
+                                    "id": "hotel"
+                                },
+                                "_id": "6772e1d9d9ed3a046ab7d136",
+                                "ownerId": "671a02c2c0202050e0969548",
+                                "name": "LAVENDER HOTEL",
+                                "description": "Khách sạn sang trọng với các phòng được thiết kế tinh tế, trang bị TV màn hình phẳng, minibar, và Wi-Fi miễn phí.",
+                                "rating": 0,
+                                "numberOfRating": 0,
+                                "image": [
+                                    {
+                                        "_id": "6772e1d9d9ed3a046ab7d137",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735582191/travel-social/file-1735582162387-6f9a2ebe.avif.avif"
+                                    }
+                                ],
+                                "address": "07 đường 41, Phường 6, Quận 4, TP. HCM",
+                                "province": "TP.HCM",
+                                "dateCreated": "2024-12-30T18:09:29.791Z",
+                                "status": "active",
+                                "minPrice": 350000
+                            },
+                            {
+                                "category": {
+                                    "id": "hotel",
+                                    "name": "Khách sạn"
+                                },
+                                "_id": "6772e4e9297d75e3d50f587d",
+                                "ownerId": "671a02c2c0202050e0969548",
+                                "name": "Khách sạn Minh Hằng 2",
+                                "description": "Khách sạn cao cấp với dịch vụ spa và hồ bơi sang trọng.",
+                                "rating": 4.5,
+                                "numberOfRating": 0,
+                                "image": [
+                                    {
+                                        "_id": "6772e4e9297d75e3d50f587e",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735582975/travel-social/file-1735582946714-6f9a2ebe.avif.avif"
+                                    }
+                                ],
+                                "address": "152 ngô thuyền, Phường Quảng Thắng, Thành phố Thanh Hóa",
+                                "province": "Thanh Hóa",
+                                "dateCreated": "2024-12-30T18:22:33.742Z",
+                                "status": "active",
+                                "minPrice": 280000
+                            },
+                            {
+                                "category": {
+                                    "id": "guest home"
+                                },
+                                "_id": "6772e57e297d75e3d50f5888",
+                                "ownerId": "671a02c2c0202050e0969548",
+                                "name": "Nhà nghỉ Nhật Quang",
+                                "description": "Nhà nghỉ tiện nghi gần hồ Ba Bể, phục vụ tốt cho du khách thăm quan vùng núi phía Bắc.",
+                                "rating": 4.2,
+                                "numberOfRating": 0,
+                                "image": [
+                                    {
+                                        "_id": "6772e57e297d75e3d50f5889",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735583127/travel-social/file-1735583098276-77807812.avif.avif"
+                                    }
+                                ],
+                                "address": "Thôn Cốc Tộc, xã Nam Mẫu, huyện Ba Bể, tỉnh Bắc Kạn",
+                                "province": "Bắc Kạn",
+                                "dateCreated": "2024-12-30T18:25:02.226Z",
+                                "status": "active",
+                                "minPrice": 180000
+                            },
+                            {
+                                "category": {
+                                    "id": "hotel"
+                                },
+                                "_id": "6772e623297d75e3d50f588f",
+                                "ownerId": "671a02c2c0202050e0969548",
+                                "name": "Ivy Hotel",
+                                "description": "Khách sạn hiện đại với view đẹp nhìn ra vịnh Hạ Long, dịch vụ ẩm thực cao cấp.",
+                                "rating": 4.8,
+                                "numberOfRating": 0,
+                                "image": [
+                                    {
+                                        "_id": "6772e623297d75e3d50f5890",
+                                        "url": "https://res.cloudinary.com/dzy4gcw1k/image/upload/v1735583282/travel-social/file-1735583253641-c9c8e087.avif.avif"
+                                    }
+                                ],
+                                "address": "Số 18 - Ngõ 1 - vườn đào- phường bãi cháy - Thành Phố hạ Long",
+                                "province": "Quảng Ninh",
+                                "dateCreated": "2024-12-30T18:27:47.540Z",
+                                "status": "active",
+                                "minPrice": 450000
+                            }
+                        ],
+                        "total": 55,
+                        "page": 1,
+                        "limit": 20
+                    },
+                    "error": null
+                };
+                
+                // Map the location data to product format for our UI
+                const products = locationData.data.data.filter(location => location.status === "active").map((location, index) => {
+                    return {
+                        product_id: location._id, // Use the location ID as product ID
+                        name: location.name,
+                        description: location.description || "Không có mô tả",
+                        price: location.minPrice ? (location.minPrice / 1000).toFixed(0) + "k VND" : "N/A",
+                        rating: location.rating || 0,
+                        image: location.image && location.image.length > 0 ? location.image[0].url : null,
+                        address: location.address,
+                        province: location.province || "",
+                        category: location.category ? (location.category.name || location.category.id) : "Địa điểm",
+                        latitude: location.latitude,
+                        longitude: location.longitude
+                    };
+                });
+                  displayProducts(products);
+                
+                // Initialize map and add markers
+                initMap();
+                addLocationMarkers(products);
+                addProductCardClickHandlers(products);
             } catch (error) {
                 logMessage(`Error fetching products: ${error.message}`, 'error');
             }
@@ -245,15 +626,25 @@
                 card.className = 'product-card';
                 card.dataset.id = product.product_id;
                 
+                // Create image HTML if image is available
+                const imageHtml = product.image ? 
+                    `<div class="product-image">
+                        <img src="${product.image}" alt="${product.name}" style="width:100%; height:150px; object-fit:cover; border-radius:3px;">
+                    </div>` : '';
+                
                 card.innerHTML = `
+                    ${imageHtml}
                     <h3>${product.name}</h3>
-                    <p>${product.description}</p>
-                    <p>Price: $${product.price}</p>
-                    <p>Rating: ${product.rating}/5</p>
+                    <p class="category">${product.category}</p>
+                    <p class="address"><i>${product.address}</i></p>
+                    <p>${product.description.length > 100 ? product.description.substring(0, 100) + '...' : product.description}</p>
+                    <p><strong>Giá từ:</strong> ${product.price}</p>
+                    <p><strong>Tỉnh/TP:</strong> ${product.province}</p>
+                    <p><strong>Đánh giá:</strong> ${product.rating}/5</p>
                     <div class="actions">
-                        <button class="view-btn" data-id="${product.product_id}">View</button>
-                        <button class="cart-btn" data-id="${product.product_id}">Add to Cart</button>
-                        <button class="purchase-btn" data-id="${product.product_id}">Purchase</button>
+                        <button class="view-btn" data-id="${product.product_id}">Xem</button>
+                        <button class="cart-btn" data-id="${product.product_id}">Lưu</button>
+                        <button class="purchase-btn" data-id="${product.product_id}">Đặt</button>
                     </div>
                 `;
                 
@@ -268,22 +659,31 @@
             document.querySelectorAll('.cart-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => handleProductAction(e, 'add_to_cart'));
             });
-            
-            document.querySelectorAll('.purchase-btn').forEach(btn => {
+              document.querySelectorAll('.purchase-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => handleProductAction(e, 'purchase'));
             });
+            
+            // Add click handlers for the product cards to show their location on the map
+            addProductCardClickHandlers(products);
         }
 
         // Handle product actions (view, add to cart, purchase)
         async function handleProductAction(event, actionType) {
-            const productId = parseInt(event.target.dataset.id);
+            const productId = event.target.dataset.id;
             
             if (!connected) {
-                logMessage('Please connect a user first', 'error');
+                logMessage('Vui lòng kết nối người dùng trước', 'error');
                 return;
             }
             
             try {
+                // Map action types to Vietnamese for logging
+                const actionLabels = {
+                    'view': 'Xem',
+                    'add_to_cart': 'Lưu',
+                    'purchase': 'Đặt'
+                };
+                
                 const response = await fetch(`${apiBaseUrl}/event`, {
                     method: 'POST',
                     headers: {
@@ -299,9 +699,9 @@
                 const data = await response.json();
                 
                 if (data.error) {
-                    logMessage(`Error: ${data.error}`, 'error');
+                    logMessage(`Lỗi: ${data.error}`, 'error');
                 } else {
-                    logMessage(`Event recorded: ${actionType} product ${productId}`, 'success');
+                    logMessage(`Đã ghi nhận sự kiện: ${actionLabels[actionType]} địa điểm ${productId}`, 'success');
                     
                     // If recommendations are included in the response and not sent via websocket, display them
                     if (data.recommendations && !data.sent_via_socket) {
@@ -310,7 +710,7 @@
                 }
                 
             } catch (error) {
-                logMessage(`Error recording event: ${error.message}`, 'error');
+                logMessage(`Lỗi khi ghi nhận sự kiện: ${error.message}`, 'error');
             }
         }
 
@@ -321,14 +721,14 @@
                 const data = await response.json();
                 
                 if (data.error) {
-                    logMessage(`Error: ${data.error}`, 'error');
+                    logMessage(`Lỗi: ${data.error}`, 'error');
                 } else {
-                    logMessage('Loaded initial recommendations', 'info');
+                    logMessage('Đã tải đề xuất ban đầu', 'info');
                     displayRecommendations(data.recommendations);
                 }
                 
             } catch (error) {
-                logMessage(`Error fetching recommendations: ${error.message}`, 'error');
+                logMessage(`Lỗi khi tải đề xuất: ${error.message}`, 'error');
             }
         }
 
@@ -339,7 +739,7 @@
             if (!recommendations || recommendations.length === 0) {
                 const item = document.createElement('div');
                 item.className = 'rec-item';
-                item.textContent = 'No recommendations available';
+                item.textContent = 'Không có đề xuất nào';
                 recommendationList.appendChild(item);
                 return;
             }
@@ -348,46 +748,179 @@
                 const item = document.createElement('div');
                 item.className = 'rec-item';
                 
+                // Create image HTML if image is available
+                const imageHtml = rec.image ? 
+                    `<div class="rec-image">
+                        <img src="${rec.image}" alt="${rec.name}" style="width:100%; height:120px; object-fit:cover; border-radius:3px; margin-bottom:8px;">
+                    </div>` : '';
+                
                 // Create HTML content based on available properties
-                let content = '';
+                let content = imageHtml;
+                
                 if (rec.name) {
                     content += `<h3>${rec.name}</h3>`;
-                } else {
-                    content += `<h3>Product ${rec.product_id}</h3>`;
+                } else if (rec.product_id) {
+                    content += `<h3>Địa điểm ${rec.product_id}</h3>`;
+                }
+                
+                if (rec.category) {
+                    content += `<p class="category">${rec.category}</p>`;
+                }
+                
+                if (rec.address) {
+                    content += `<p class="address"><i>${rec.address}</i></p>`;
                 }
                 
                 if (rec.description) {
-                    content += `<p>${rec.description}</p>`;
+                    content += `<p>${rec.description.length > 100 ? rec.description.substring(0, 100) + '...' : rec.description}</p>`;
                 }
                 
                 if (rec.price) {
-                    content += `<p>Price: $${rec.price}</p>`;
+                    content += `<p><strong>Giá từ:</strong> ${rec.price}</p>`;
+                }
+                
+                if (rec.province) {
+                    content += `<p><strong>Tỉnh/TP:</strong> ${rec.province}</p>`;
                 }
                 
                 if (rec.rating) {
-                    content += `<p>Rating: ${rec.rating}/5</p>`;
+                    content += `<p><strong>Đánh giá:</strong> ${rec.rating}/5</p>`;
                 }
                 
                 if (rec.score) {
-                    content += `<p>Recommendation Score: ${parseFloat(rec.score).toFixed(2)}</p>`;
+                    content += `<p><strong>Điểm đề xuất:</strong> ${parseFloat(rec.score).toFixed(2)}</p>`;
                 }
                 
                 if (rec.source) {
-                    content += `<p>Source: ${rec.source}</p>`;
+                    content += `<p><strong>Nguồn đề xuất:</strong> ${rec.source}</p>`;
+                }
+                  item.innerHTML = content;
+                item.dataset.id = rec.product_id || "";
+                
+                // Add click handler to highlight on map if coordinates are available
+                if (rec.latitude && rec.longitude) {
+                    item.style.cursor = "pointer";
+                    item.addEventListener('click', () => {
+                        map.setView([rec.latitude, rec.longitude], 14);
+                        
+                        // Find or create marker
+                        let found = false;
+                        markers.forEach(marker => {
+                            const pos = marker.getLatLng();
+                            if (pos.lat === rec.latitude && pos.lng === rec.longitude) {
+                                marker.openPopup();
+                                found = true;
+                            }
+                        });
+                        
+                        // If no existing marker, create one temporarily
+                        if (!found) {
+                            const marker = L.marker([rec.latitude, rec.longitude])
+                                .addTo(map)
+                                .bindPopup(`
+                                    <strong>${rec.name}</strong><br/>
+                                    ${rec.address || ''}<br/>
+                                    <small>${rec.category || ''}</small>
+                                `).openPopup();
+                            markers.push(marker);
+                        }
+                    });
                 }
                 
-                item.innerHTML = content;
                 recommendationList.appendChild(item);
             });
+        }        // Map functionality
+        let map;
+        let markers = [];
+        
+        // Initialize map
+        function initMap() {
+            // Center on Vietnam
+            map = L.map('map').setView([16.0544, 108.2022], 5);
+            
+            // Add OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            
+            logMessage("Bản đồ đã được khởi tạo", "info");
         }
-
-        // Event listeners
+        
+        // Add markers for all locations to the map
+        function addLocationMarkers(products) {
+            // Clear existing markers
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            
+            // Add new markers
+            products.forEach(product => {
+                if (product.latitude && product.longitude) {
+                    const marker = L.marker([product.latitude, product.longitude])
+                        .addTo(map)
+                        .bindPopup(`
+                            <strong>${product.name}</strong><br/>
+                            ${product.address}<br/>
+                            <small>${product.category || ''}</small>
+                        `);
+                    markers.push(marker);
+                }
+            });
+            
+            if (markers.length > 0) {
+                logMessage(`Đã hiển thị ${markers.length} địa điểm trên bản đồ`, "info");
+            } else {
+                logMessage("Không có dữ liệu vị trí để hiển thị trên bản đồ", "info");
+            }
+        }        // Highlight a product on the map
+        function highlightLocationOnMap(productId, products) {
+            const product = products.find(p => p.product_id === productId);
+            
+            if (product && product.latitude && product.longitude) {
+                // Zoom to the location
+                map.setView([product.latitude, product.longitude], 14);
+                
+                // Find the marker and open its popup
+                markers.forEach(marker => {
+                    const markerLatLng = marker.getLatLng();
+                    if (markerLatLng.lat === product.latitude && markerLatLng.lng === product.longitude) {
+                        marker.openPopup();
+                    }
+                });
+                
+                logMessage(`Đã định vị "${product.name}" trên bản đồ`, "info");
+            } else {
+                logMessage("Không có dữ liệu vị trí cho địa điểm này", "error");
+            }
+        }
+        
+        // Add click handler for the entire product card
+        function addProductCardClickHandlers(products) {
+            document.querySelectorAll('.product-card').forEach(card => {
+                card.addEventListener('click', function(e) {
+                    // Only handle clicks on the card itself, not on buttons
+                    if (!e.target.classList.contains('view-btn') && 
+                        !e.target.classList.contains('cart-btn') && 
+                        !e.target.classList.contains('purchase-btn')) {
+                        const productId = this.dataset.id;
+                        highlightLocationOnMap(productId, products);
+                    }
+                });
+            });
+        }        // Event listeners
         connectBtn.addEventListener('click', connectSocket);
         disconnectBtn.addEventListener('click', disconnectSocket);
+
+        // Welcome message
+        function showWelcomeMessage() {
+            logMessage("Chào mừng đến với hệ thống đề xuất địa điểm du lịch theo thời gian thực!", "info");
+            logMessage("Nhập ID người dùng và nhấp 'Kết nối' để bắt đầu nhận đề xuất.", "info");
+        }
 
         // Initialize
         fetchProducts();
         updateConnectionUI();
+        showWelcomeMessage();
+        initMap();
     </script>
 </body>
 </html>

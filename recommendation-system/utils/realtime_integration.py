@@ -6,7 +6,8 @@ from flask_socketio import emit
 from datetime import datetime
 import pandas as pd
 import json
-from utils.json_utils import convert_to_json_serializable
+from utils.json_utils import convert_to_json_serializable, clean_json_data
+from utils.mongodb_json_cleaner import clean_mongodb_json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -103,9 +104,13 @@ class RealtimeIntegration:
         tuple
             (success, recommendations)
         """
-        # Convert IDs to the right type if needed
-        user_id = int(user_id) if not isinstance(user_id, int) else user_id
-        product_id = int(product_id) if not isinstance(product_id, int) else product_id
+        # Handle IDs with a safer approach - don't force conversion to int
+        # MongoDB IDs and other string IDs should be preserved as strings
+        # Only convert to int if they're numeric strings for backward compatibility
+        # Always ensure IDs are strings for consistent handling with MongoDB-style IDs
+        user_id = str(user_id) if user_id is not None else None
+        product_id = str(product_id) if product_id is not None else None
+        logger.debug(f"Using string IDs: user_id={user_id}, product_id={product_id}")
         
         # Set timestamp if not provided
         if timestamp is None:
@@ -113,7 +118,12 @@ class RealtimeIntegration:
             
         # Record the event in the recommender
         if self.recommender is not None:
-            success = self.recommender.record_event(user_id, product_id, event_type, timestamp)
+            try:
+                # Since realtime.py expects location_id, pass product_id as location_id
+                success = self.recommender.record_event(user_id, product_id, event_type, timestamp)
+            except Exception as e:
+                logger.error(f"Error recording event in recommender: {str(e)}")
+                success = False
         else:
             logger.warning("No recommender available to record event")
             success = False
@@ -160,11 +170,19 @@ class RealtimeIntegration:
         if self.product_details is not None and len(recommendations) > 0:
             if isinstance(recommendations, pd.DataFrame):
                 # If recommendations is already a DataFrame, merge product details
-                # Make sure product_id has the same data type before merging
-                recommendations['product_id'] = recommendations['product_id'].astype(int)
+                # Convert all IDs to strings for safe comparison with MongoDB-style IDs
+                recommendations['product_id'] = recommendations['product_id'].astype(str)
+                
+                # Determine ID column in product_details
+                id_column = 'product_id' if 'product_id' in self.product_details.columns else 'location_id'
+                
+                # Create a copy of product_details with string IDs
+                product_details_copy = self.product_details.copy()
+                product_details_copy[id_column] = product_details_copy[id_column].astype(str)
+                
                 recommendations = pd.merge(
                     recommendations,
-                    self.product_details.astype({'product_id': int}),
+                    product_details_copy,
                     on="product_id",
                     how="left"
                 )
@@ -257,8 +275,10 @@ class RealtimeIntegration:
         else:
             rec_list = recommendations
             
-        # Convert any NumPy types to standard Python types for JSON serialization
-        rec_list = convert_to_json_serializable(rec_list)
+        # Clean and convert any problematic data types for JSON serialization
+        # This will handle NumPy types, MongoDB ObjectIDs, and Unicode characters properly
+        # Sử dụng hàm nâng cao xử lý MongoDB JSON
+        rec_list = clean_mongodb_json(rec_list)
             
         try:
             # Send recommendations via Socket.IO to the specific user

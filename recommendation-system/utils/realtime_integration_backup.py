@@ -47,7 +47,7 @@ class RealtimeIntegration:
         self.user_socket_connections[user_id] = socket_id
         logger.info(f"Registered user {user_id} with socket ID {socket_id}")
         return True
-          def unregister_user(self, user_id=None, socket_id=None):
+    def unregister_user(self, user_id=None, socket_id=None):
         """
         Unregister a user from socket connections
         

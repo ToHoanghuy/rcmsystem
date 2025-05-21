@@ -1,0 +1,9 @@
+user_id,product_id,event_type,timestamp
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc5d", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T15:03:25.298305"}
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc5d", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T17:29:38.650462"}
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc5e", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T17:30:24.047307"}
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc60", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T17:37:40.056013"}
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc60", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T17:39:05.454529"}
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc60", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T17:47:40.367032"}
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc61", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T17:48:39.699263"}
+{"user_id": "6729d0e8dda9481629a2a2e9", "location_id": "6704f3650722c4f99305dc60", "event_type": "view", "data": {"source": "detail_screen"}, "timestamp": "2025-05-20T18:06:06.181949"}

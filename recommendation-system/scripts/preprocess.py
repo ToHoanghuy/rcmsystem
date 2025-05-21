@@ -10,9 +10,16 @@ logger = logging.getLogger(__name__)
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+# Import MongoDB loader
+from utils.mongodb_loader import load_data_from_mongodb_or_csv
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+# Import MongoDB loader
+from utils.mongodb_loader import load_data_from_mongodb_or_csv
 from preprocess.preprocess import preprocess_data, load_data, load_event_data, load_product_details, integrate_event_data
 
-def preprocess_pipeline(ratings_df=None, products_df=None, events_df=None, normalize=True):
+def preprocess_pipeline(ratings_df=None, products_df=None, events_df=None, normalize=True, use_mongodb=True):
     """
     Preprocess and integrate data from multiple sources
     
@@ -26,6 +33,8 @@ def preprocess_pipeline(ratings_df=None, products_df=None, events_df=None, norma
         DataFrame containing user-product events
     normalize : bool, optional
         Whether to normalize numeric features
+    use_mongodb : bool, optional
+        Whether to use MongoDB data (default: True)
     
     Returns:
     --------
@@ -33,7 +42,25 @@ def preprocess_pipeline(ratings_df=None, products_df=None, events_df=None, norma
         Integrated dataset with all available features
     """
     if ratings_df is None and products_df is None and events_df is None:
-        # Default behavior: use files from data directory
+        # Default behavior: use MongoDB if available, otherwise use files from data directory
+        if use_mongodb:
+            logger.info("Attempting to load data from MongoDB")
+            products_df = load_data_from_mongodb_or_csv('locations')
+            events_df = load_data_from_mongodb_or_csv('events')
+            ratings_df = load_data_from_mongodb_or_csv('ratings')
+            
+            # If we got data from MongoDB, process it directly
+            if not (products_df.empty and events_df.empty and ratings_df.empty):
+                logger.info("Using data from MongoDB for preprocessing")
+                return preprocess_pipeline(
+                    ratings_df=ratings_df,
+                    products_df=products_df,
+                    events_df=events_df,
+                    normalize=normalize,
+                    use_mongodb=False  # Prevent recursion
+                )
+        
+        # Fall back to using files if MongoDB data is not available
         root_dir = Path(__file__).parent.parent
         ratings_path = os.path.join(root_dir, 'data', 'raw', 'dataset.csv')
         products_path = os.path.join(root_dir, 'data', 'raw', 'products.csv')

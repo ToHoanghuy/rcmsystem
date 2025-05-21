@@ -72,10 +72,18 @@ def preprocess_events_advanced(events_path):
         except Exception as e:
             logger.error(f"Failed to read events data: {str(e)}")
             return pd.DataFrame()
-    
-    # Nếu có cột timestamp, chuyển đổi thành datetime
+      # Nếu có cột timestamp, chuyển đổi thành datetime
     if 'timestamp' in events.columns:
-        events['timestamp'] = pd.to_datetime(events['timestamp'])
+        try:
+            # Thử chuyển đổi với format cụ thể
+            events['timestamp'] = pd.to_datetime(events['timestamp'], format='%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            try:
+                # Thử với format ISO8601
+                events['timestamp'] = pd.to_datetime(events['timestamp'], format='ISO8601')
+            except:
+                # Nếu không được, để pandas tự động nhận dạng định dạng
+                events['timestamp'] = pd.to_datetime(events['timestamp'], errors='coerce')
         
         # Tính thời gian đã trôi qua (theo ngày)
         current_time = datetime.now()
@@ -154,10 +162,31 @@ def analyze_user_behavior_sequence(events):
         except Exception as e:
             logger.error(f"Failed to read events data for behavior analysis: {str(e)}")
             return {}
-    
+
+    # Make sure product_id exists (if only location_id exists, copy it to product_id)
+    if 'location_id' in events.columns and 'product_id' not in events.columns:
+        events['product_id'] = events['location_id']
+    # If only product_id exists, copy it to location_id
+    elif 'product_id' in events.columns and 'location_id' not in events.columns:
+        events['location_id'] = events['product_id']
+    # If neither exists, we can't proceed
+    elif 'product_id' not in events.columns and 'location_id' not in events.columns:
+        logger.error("Events data is missing both product_id and location_id columns")
+        return {}
+      
     # Nếu có timestamp, sắp xếp theo thời gian
     if 'timestamp' in events.columns:
-        events['timestamp'] = pd.to_datetime(events['timestamp'])
+        try:
+            # Thử chuyển đổi với format cụ thể
+            events['timestamp'] = pd.to_datetime(events['timestamp'], format='%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            try:
+                # Thử với format ISO8601
+                events['timestamp'] = pd.to_datetime(events['timestamp'], format='ISO8601')
+            except:
+                # Nếu không được, để pandas tự động nhận dạng định dạng
+                events['timestamp'] = pd.to_datetime(events['timestamp'], errors='coerce')
+                
         events = events.sort_values(by=['user_id', 'timestamp'])
     else:
         logger.warning("No timestamp column found for sequence analysis. Results may be less accurate.")
@@ -165,6 +194,8 @@ def analyze_user_behavior_sequence(events):
     # Tính xác suất chuyển đổi giữa các loại sự kiện
     transition_counts = {}
     user_count = 0
+      # Convert user_ids to strings for consistent comparison
+    events['user_id'] = events['user_id'].astype(str)
     
     for user_id in events['user_id'].unique():
         user_events = events[events['user_id'] == user_id]
@@ -420,16 +451,19 @@ def recommend_based_on_events_advanced(user_id, events_path, product_details, tr
         # Nếu không có dữ liệu sự kiện, trả về sản phẩm phổ biến
         popular_products = product_details.sort_values(by='rating', ascending=False).head(top_n) if 'rating' in product_details.columns else product_details.head(top_n)
         return popular_products
-    
-    # Tìm sự kiện gần đây nhất của người dùng
+      # Tìm sự kiện gần đây nhất của người dùng
     events = pd.read_csv(events_path) if isinstance(events_path, str) else events_path.copy()
     
     next_product_scores = {}
     
+    # Ensure user_id is a string for consistent comparison with MongoDB IDs
+    user_id_str = str(user_id) if user_id is not None else None
+    events['user_id'] = events['user_id'].astype(str)
+    
     # Nếu có timestamp và transition_probs, sử dụng phân tích chuỗi hành vi
     if 'timestamp' in events.columns and transition_probs:
         events['timestamp'] = pd.to_datetime(events['timestamp'])
-        latest_events = events[(events['user_id'] == user_id)].sort_values(by='timestamp', ascending=False).head(3)
+        latest_events = events[(events['user_id'] == user_id_str)].sort_values(by='timestamp', ascending=False).head(3)
         
         if not latest_events.empty:
             # Dự đoán sản phẩm tiếp theo dựa trên chuỗi hành vi

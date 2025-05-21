@@ -129,20 +129,38 @@ def load_product_details(filepath):
     """
     products = load_data(filepath)
     
+    # Check for NaN values and report
+    null_counts = products.isnull().sum()
+    if null_counts.sum() > 0:
+        logger.warning(f"Found {null_counts.sum()} NaN values in product details data")
+        logger.warning(f"NaN counts per column:\n{null_counts[null_counts > 0]}")
+    
     # Check if 'name' column exists and rename it to 'product_name' if needed
     if 'name' in products.columns and 'product_name' not in products.columns:
         products['product_name'] = products['name']
     
     # Đảm bảo có các cột cần thiết
-    required_columns = ['product_id', 'product_name']
+    required_columns = ['product_id']
     missing_columns = [col for col in required_columns if col not in products.columns]
     
     if missing_columns:
         raise ValueError(f"Thiếu các cột cần thiết trong product data: {missing_columns}")
     
-    # Chuyển đổi product_id thành kiểu int nếu cần
+    # Check for and handle nulls in product_id which is critical
+    if products['product_id'].isnull().any():
+        logger.error(f"Found {products['product_id'].isnull().sum()} null values in product_id column")
+        logger.info("Removing rows with null product_id")
+        products = products.dropna(subset=['product_id'])
+    
+    # Chuyển đổi product_id thành kiểu int nếu có thể, nếu không thì giữ nguyên dạng string
     if products['product_id'].dtype != 'int64':
-        products['product_id'] = products['product_id'].astype(int)
+        try:
+            # Thử chuyển đổi sang int
+            products['product_id'] = products['product_id'].astype(int)
+        except (ValueError, TypeError):
+            # Nếu không thể, để nguyên dạng, nhưng đảm bảo là string
+            products['product_id'] = products['product_id'].astype(str)
+            logger.info("Không thể chuyển product_id sang số nguyên, giữ nguyên dạng chuỗi.")
         
     return products
 

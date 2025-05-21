@@ -52,11 +52,23 @@ def train_collaborative_model(data, optimize_params=True):
             other_ratings = data[data[rating_col] != 5.0]
             data = pd.concat([other_ratings, rating_5_samples])
             print(f"Balanced high rating samples to reduce bias. New count: {len(data[data[rating_col] == 5.0])}")
-    
     reader = Reader(rating_scale=(1, 5))
     # Create a copy of the DataFrame with standard column names for Surprise
     surprise_data = data.copy()
     surprise_data['rating'] = surprise_data[rating_col]
+    
+    # Đảm bảo user_id và product_id có thể sử dụng với Surprise
+    # Surprise yêu cầu các ID phải là số hoặc chuỗi, nhưng thường thích số hơn
+    try:
+        # Nếu là chuỗi, thử chuyển sang số nguyên
+        if surprise_data['user_id'].dtype == object:
+            surprise_data['user_id'] = pd.to_numeric(surprise_data['user_id'], errors='ignore')
+        if surprise_data['product_id'].dtype == object:
+            surprise_data['product_id'] = pd.to_numeric(surprise_data['product_id'], errors='ignore')
+    except Exception as e:
+        print(f"Warning: Could not convert IDs to numeric, will use as is: {e}")
+    
+    print(f"Data types: user_id: {surprise_data['user_id'].dtype}, product_id: {surprise_data['product_id'].dtype}")
     dataset = Dataset.load_from_df(surprise_data[['user_id', 'product_id', 'rating']], reader)
     
     # Thêm trọng số ngược với tần suất để tăng ảnh hưởng của rating hiếm
@@ -158,10 +170,10 @@ def predict_for_cold_start(user_id, product_id, model, content_similarity, produ
     
     Parameters:
     -----------
-    user_id: int
-        ID của người dùng
-    product_id: int
-        ID của sản phẩm
+    user_id: int or str
+        ID của người dùng (có thể là chuỗi cho MongoDB IDs)
+    product_id: int or str
+        ID của sản phẩm (có thể là chuỗi cho MongoDB IDs)
     model: SVD/SVDpp model
         Mô hình Collaborative Filtering
     content_similarity: numpy.ndarray
@@ -178,15 +190,26 @@ def predict_for_cold_start(user_id, product_id, model, content_similarity, produ
     confidence = 0.0
     
     try:
-        # Thử dự đoán bằng CF
-        prediction = model.predict(uid=user_id, iid=product_id)
+        # Thử dự đoán bằng CF, đảm bảo kiểu dữ liệu đúng với model
+        # Surprise có thể yêu cầu uid và iid là chuỗi hoặc số nguyên
+        try:
+            prediction = model.predict(uid=user_id, iid=product_id)
+        except (ValueError, TypeError) as e:
+            # Nếu là lỗi chuyển đổi kiểu dữ liệu, thử với dạng chuỗi
+            print(f"Trying prediction with string IDs: {e}")
+            prediction = model.predict(uid=str(user_id), iid=str(product_id))
+            
         confidence = 1.0  # Độ tin cậy cao nhất khi có dự đoán trực tiếp
         estimated_rating = prediction.est
-    except:
+    except Exception as e:
+        print(f"Collaborative prediction failed: {e}")
         # Nếu không được, sử dụng content-based
         try:
-            # Tìm index của sản phẩm trong product_details
-            product_row = product_details[product_details['product_id'] == product_id]
+            # Tìm index của sản phẩm trong product_details, đảm bảo kiểu dữ liệu phù hợp
+            if isinstance(product_id, (int, float, str)):
+                product_row = product_details[product_details['product_id'].astype(str) == str(product_id)]
+            else:
+                product_row = product_details[product_details['product_id'] == product_id]
             
             if product_row.empty:
                 # Sản phẩm không tồn tại trong dữ liệu
@@ -210,11 +233,27 @@ def predict_for_cold_start(user_id, product_id, model, content_similarity, produ
                 # Chỉ xem xét các sản phẩm đủ tương tự
                 if similarity < 0.2:
                     continue
-                    
+                
                 try:
                     # Thử lấy đánh giá thực tế của người dùng cho sản phẩm tương tự
-                    inner_uid = model.trainset.to_inner_uid(user_id)
-                    inner_iid = model.trainset.to_inner_iid(similar_product_id)
+                    # Thử với cả kiểu dữ liệu gốc và kiểu string cho user_id
+                    try:
+                        inner_uid = model.trainset.to_inner_uid(user_id)
+                    except (ValueError, KeyError):
+                        try:
+                            inner_uid = model.trainset.to_inner_uid(str(user_id))
+                        except:
+                            raise ValueError(f"User ID {user_id} not found in trainset")
+                    
+                    # Thử với cả kiểu dữ liệu gốc và kiểu string cho product_id
+                    try:
+                        inner_iid = model.trainset.to_inner_iid(similar_product_id)
+                    except (ValueError, KeyError):
+                        try:
+                            inner_iid = model.trainset.to_inner_iid(str(similar_product_id))
+                        except:
+                            raise ValueError(f"Similar product ID {similar_product_id} not found in trainset")
+                    
                     user_ratings = model.trainset.ur[inner_uid]
                     
                     for item_idx, rating_val in user_ratings:
@@ -226,7 +265,13 @@ def predict_for_cold_start(user_id, product_id, model, content_similarity, produ
                 except:
                     # Nếu không có đánh giá thực tế, thử dự đoán
                     try:
-                        pred = model.predict(uid=user_id, iid=similar_product_id)
+                        # Thử dự đoán với kiểu dữ liệu gốc
+                        try:
+                            pred = model.predict(uid=user_id, iid=similar_product_id)
+                        except:
+                            # Nếu có lỗi, thử với chuỗi
+                            pred = model.predict(uid=str(user_id), iid=str(similar_product_id))
+                        
                         similar_ratings.append(pred.est)
                         similarity_weights.append(similarity * 0.8)  # Giảm trọng số cho dự đoán
                     except:
