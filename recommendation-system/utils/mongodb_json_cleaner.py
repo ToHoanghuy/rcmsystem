@@ -124,8 +124,15 @@ def clean_mongodb_json(data):
             elif isinstance(value, list):
                 result[key] = [clean_mongodb_json(item) for item in value]
             else:
-                # Giữ nguyên kiểu dữ liệu cơ bản
-                result[key] = value
+                # Chuyển các kiểu numpy về kiểu Python chuẩn (dù không phải NaN)
+                if isinstance(value, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+                    result[key] = int(value)
+                elif isinstance(value, (np.floating, np.float64, np.float32, np.float16)):
+                    result[key] = float(value)
+                elif isinstance(value, np.bool_):
+                    result[key] = bool(value)
+                else:
+                    result[key] = value
                 
         return result    
     elif isinstance(data, list):
@@ -137,5 +144,11 @@ def clean_mongodb_json(data):
         # Chuyển NumPy array thành list và xử lý
         return [clean_mongodb_json(item) for item in data.tolist()]
     else:
-        # Trả về giá trị nguyên
+        # Chuyển các kiểu numpy về kiểu Python chuẩn
+        if isinstance(data, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+            return int(data)
+        if isinstance(data, (np.floating, np.float64, np.float32, np.float16)):
+            return float(data)
+        if isinstance(data, np.bool_):
+            return bool(data)
         return data

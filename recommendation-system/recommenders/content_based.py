@@ -3,129 +3,157 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 import pandas as pd
 import numpy as np
+import os
+import pickle
 
-def extract_features(product_details):
+def extract_features(product_details, save_vectorizer_scaler=True, vectorizer_path='tfidf_vectorizer.pkl', scaler_path='num_scaler.pkl'):
     """
-    Trích xuất và kết hợp các đặc trưng khác nhau từ dữ liệu sản phẩm
-    
-    Parameters:
-    -----------
-    product_details: DataFrame
-        DataFrame chứa thông tin chi tiết về sản phẩm
-        
-    Returns:
-    --------
-    all_features: DataFrame
-        DataFrame chứa tất cả các đặc trưng đã xử lý
+    Trích xuất và kết hợp các đặc trưng khác nhau từ dữ liệu sản phẩm, cải tiến xử lý text, categorical, numerical, giảm sparse, hỗ trợ đa ngôn ngữ.
+    Luôn thêm col_missing cho numerical, tự động lưu vectorizer & scaler, xử lý sâu slug/category_id.
     """
-    # Kiểm tra và báo cáo các cột hiện có
-    print(f"[DEBUG] Product details columns: {product_details.columns.tolist()}")
-    print(f"[DEBUG] Number of products: {len(product_details)}")
-    if 'product_id' in product_details.columns:
-        print(f"[DEBUG] First 3 product IDs: {product_details['product_id'].head(3).tolist()}")
-    
-    # Chuyển mọi giá trị kiểu list thành string để tránh lỗi unhashable
-    for col in product_details.columns:
-        if col not in ['product_id', 'description']:
-            product_details[col] = product_details[col].apply(lambda x: ','.join(map(str, x)) if isinstance(x, (dict, list)) else x)
-    
-    # Lưu lại product_id để sau này map lại
-    product_ids = product_details['product_id'].tolist()
-    
-    # FORCE: Tạo cột mô tả nếu không tồn tại hoặc tất cả đều rỗng
-    has_valid_description = False
-    if 'description' in product_details.columns:
-        if not product_details['description'].fillna('').str.strip().eq('').all():
-            has_valid_description = True
-    
-    if not has_valid_description:
-        print("[DEBUG] No valid description column found, creating from all text columns")
-        # Tạo mô tả từ tất cả các cột văn bản trừ product_id
-        text_cols = [col for col in product_details.columns if col != 'product_id' 
-                    and product_details[col].dtype == 'object']
-        
+    import re
+    import unicodedata
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.preprocessing import RobustScaler, LabelEncoder
+    from sklearn.decomposition import TruncatedSVD
+    from langdetect import detect
+    import numpy as np
+    import pandas as pd
+    import json
+    # 1. Chuẩn hóa text, tạo cột description nếu cần
+    def normalize_text(text):
+        if not isinstance(text, str):
+            text = str(text)
+        text = text.lower()
+        text = unicodedata.normalize('NFKC', text)
+        text = text.replace('\x00', '')
+        text = re.sub(r'[^\w\sÀ-ỹ-]', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+
+    # Tạo description nếu chưa có hoặc rỗng
+    if 'description' not in product_details.columns or product_details['description'].fillna('').str.strip().eq('').all():
+        text_cols = [col for col in product_details.columns if col != 'product_id' and product_details[col].dtype == 'object']
         if text_cols:
-            # Kết hợp tất cả các cột text thành một mô tả
-            product_details['description'] = product_details[text_cols].fillna('').astype(str).apply(
-                lambda x: ' '.join(x), axis=1
-            )
-            print(f"[DEBUG] Created description from columns: {text_cols}")
+            product_details['description'] = product_details[text_cols].fillna('').astype(str).apply(lambda x: ' '.join(x), axis=1)
         else:
-            # Nếu không có cột text, tạo mô tả từ product_id để đảm bảo có ít nhất một feature
             product_details['description'] = product_details['product_id'].astype(str)
-            print("[DEBUG] Created description from product_id as fallback")
-    
-    # Xử lý đặc trưng phân loại với one-hot encoding
-    cat_columns = []
-    for col in product_details.columns:
-        if product_details[col].dtype == 'object' and col not in ['product_id', 'description']:
-            cat_columns.append(col)
-    
-    if cat_columns:
-        # Điền giá trị thiếu trước khi áp dụng one-hot encoding
-        cat_data = product_details[cat_columns].fillna('unknown')
-        categorical_features = pd.get_dummies(cat_data)
-        print(f"[DEBUG] Created {categorical_features.shape[1]} categorical features from {len(cat_columns)} columns")
+    product_details['description'] = product_details['description'].fillna('').apply(normalize_text)
+
+    # Xử lý slug sâu hơn: tách slug thành các token phân tầng
+    if 'slug' in product_details.columns:
+        product_details['slug'] = product_details['slug'].fillna('').apply(normalize_text)
+        # Tách slug thành các phần (nếu dạng a-b-c)
+        product_details['slug_tokens'] = product_details['slug'].apply(lambda x: x.split('-') if '-' in x else [x])
+        # Tạo feature phân tầng slug depth
+        product_details['slug_depth'] = product_details['slug_tokens'].apply(len)
+        # Tạo feature slug_prefix (phân tầng đầu tiên)
+        product_details['slug_prefix'] = product_details['slug_tokens'].apply(lambda x: x[0] if len(x) > 0 else '')
+
+    # Xử lý category.id sâu hơn
+    if 'category' in product_details.columns:
+        def extract_cat_id(val):
+            if isinstance(val, dict):
+                return val.get('id', '')
+            if isinstance(val, str):
+                try:
+                    obj = json.loads(val)
+                    return obj.get('id', '')
+                except:
+                    return val
+            return ''
+        product_details['category_id'] = product_details['category'].apply(extract_cat_id)
+        # Tách category_id phân tầng nếu dạng phân cấp (vd: cat1/cat2)
+        product_details['category_main'] = product_details['category_id'].apply(lambda x: x.split('/')[0] if '/' in x else x)
+        product_details['category_depth'] = product_details['category_id'].apply(lambda x: len(x.split('/')) if isinstance(x, str) and '/' in x else 1)
+
+    # 2. Xử lý text với TF-IDF nâng cao, hỗ trợ đa ngôn ngữ
+    descriptions = product_details['description'].tolist()
+    try:
+        langs = [detect(desc) if desc.strip() else 'unknown' for desc in descriptions]
+        main_lang = max(set(langs), key=langs.count)
+    except Exception:
+        main_lang = 'unknown'
+    from sklearn.feature_extraction import text as sk_text
+    stop_words = sk_text.ENGLISH_STOP_WORDS
+    if main_lang == 'vi':
+        try:
+            from underthesea import word_tokenize
+            def vi_tokenizer(text):
+                return word_tokenize(text, format="text").split()
+            tokenizer = vi_tokenizer
+        except ImportError:
+            tokenizer = None
     else:
-        categorical_features = pd.DataFrame(index=product_details.index)
-        print("[DEBUG] No categorical features created")
-    
-    # Chuẩn hóa đặc trưng số
-    num_columns = []
-    for col in product_details.select_dtypes(include=['float64', 'int64']).columns:
-        if col != 'product_id':  # Đảm bảo không chuẩn hóa product_id
-            num_columns.append(col)
-    
-    if num_columns:
-        # Điền giá trị thiếu với giá trị trung bình của cột
-        numerical_features = product_details[num_columns].copy()
-        for col in numerical_features.columns:
-            if numerical_features[col].isnull().any():
-                column_mean = numerical_features[col].mean()
-                numerical_features[col].fillna(column_mean, inplace=True)
-                print(f"[DEBUG] Filled {col} NaN values with mean: {column_mean}")
-                
-        scaler = StandardScaler()
-        normalized_features = pd.DataFrame(
-            scaler.fit_transform(numerical_features),
-            columns=numerical_features.columns,
-            index=product_details.index
-        )
-        print(f"[DEBUG] Created {normalized_features.shape[1]} numerical features")
+        tokenizer = None
+    tfidf = TfidfVectorizer(
+        max_features=300,
+        stop_words=stop_words,
+        ngram_range=(1,2),
+        tokenizer=tokenizer
+    )
+    text_features = tfidf.fit_transform(descriptions)
+    # Lưu vectorizer nếu cần
+    if save_vectorizer_scaler:
+        try:
+            with open(vectorizer_path, 'wb') as f:
+                pickle.dump(tfidf, f)
+        except Exception as e:
+            print(f"[WARN] Could not save tfidf vectorizer: {e}")
+    # Giảm chiều nếu quá sparse
+    if text_features.shape[1] > 50:
+        svd = TruncatedSVD(n_components=50, random_state=42)
+        text_features = svd.fit_transform(text_features)
+        text_df = pd.DataFrame(text_features, index=product_details.index, columns=[f'txt_{i}' for i in range(50)])
     else:
-        normalized_features = pd.DataFrame(index=product_details.index)
-        print("[DEBUG] No numerical features created")
-    
-    # Nếu có dữ liệu văn bản như mô tả sản phẩm
-    text_df = pd.DataFrame(index=product_details.index)
-    if 'description' in product_details.columns:
-        # Điền giá trị thiếu
-        descriptions = product_details['description'].fillna('').tolist()
-        
-        if any(len(str(desc)) > 0 for desc in descriptions):  # Kiểm tra xem có mô tả nào không
-            # Xử lý văn bản với TF-IDF
-            tfidf = TfidfVectorizer(max_features=100)
-            text_features = tfidf.fit_transform([str(desc) for desc in descriptions])
-            text_feature_names = [f'text_{i}' for i in range(text_features.shape[1])]
-            text_df = pd.DataFrame(
-                text_features.toarray(), 
-                columns=text_feature_names,
-                index=product_details.index
-            )
-            print(f"[DEBUG] Created {text_df.shape[1]} text features")
+        text_df = pd.DataFrame(text_features.toarray(), index=product_details.index, columns=[f'txt_{i}' for i in range(text_features.shape[1])])
+
+    # 3. Xử lý categorical: thêm category_id, slug, slug_prefix, category_main nếu có
+    cat_columns = [col for col in product_details.columns if product_details[col].dtype == 'object' and col not in ['product_id', 'description']]
+    for extra_col in ['category_id', 'slug', 'slug_prefix', 'category_main']:
+        if extra_col in product_details.columns:
+            cat_columns.append(extra_col)
+    cat_columns = list(set(cat_columns))
+    categorical_features = pd.DataFrame(index=product_details.index)
+    for col in cat_columns:
+        nunique = product_details[col].nunique()
+        if nunique > 20:
+            freq = product_details[col].value_counts(normalize=True)
+            categorical_features[f'{col}_freq'] = product_details[col].map(freq)
         else:
-            print("[DEBUG] No valid text in descriptions")
-    
-    # Kết hợp tất cả đặc trưng
-    all_features = pd.concat([categorical_features, normalized_features, text_df], axis=1)
-    
-    # FORCE: Nếu không có features nào, tạo một feature giả
+            dummies = pd.get_dummies(product_details[col], prefix=col)
+            categorical_features = pd.concat([categorical_features, dummies], axis=1)
+
+    # 4. Xử lý numerical: điền thiếu bằng median, thêm col_missing (binary 0/1), robust scaler
+    num_columns = [col for col in product_details.select_dtypes(include=['float64', 'int64']).columns if col != 'product_id']
+    numerical_features = pd.DataFrame(index=product_details.index)
+    missing_features = pd.DataFrame(index=product_details.index)
+    if num_columns:
+        for col in num_columns:
+            median = product_details[col].median()
+            numerical_features[col] = product_details[col].fillna(median)
+            # Luôn thêm cột missing (0/1)
+            missing_features[f'{col}_missing'] = product_details[col].isnull().astype(int)
+        scaler = RobustScaler()
+        numerical_features = pd.DataFrame(scaler.fit_transform(numerical_features), columns=num_columns, index=product_details.index)
+        # Lưu scaler nếu cần
+        if save_vectorizer_scaler:
+            try:
+                with open(scaler_path, 'wb') as f:
+                    pickle.dump(scaler, f)
+            except Exception as e:
+                print(f"[WARN] Could not save scaler: {e}")
+
+    # 5. Feature tổng hợp: số lượng ảnh, độ dài mô tả, v.v.
+    if 'image' in product_details.columns:
+        categorical_features['num_images'] = product_details['image'].apply(lambda x: len(eval(x)) if isinstance(x, str) and x.startswith('[') else 0)
+    categorical_features['desc_len'] = product_details['description'].apply(lambda x: len(x.split()))
+
+    # 6. Kết hợp tất cả
+    all_features = pd.concat([categorical_features, missing_features, numerical_features, text_df], axis=1)
     if all_features.shape[1] == 0:
-        print("[DEBUG] WARNING: No features created. Creating dummy feature.")
         all_features['dummy'] = 1.0
-    
-    print(f"Feature extraction complete. Total features: {all_features.shape[1]}")
-    
+    print(f"[IMPROVED] Feature extraction complete. Total features: {all_features.shape[1]}")
     return all_features
 
 def train_content_based_model(product_details):
@@ -265,10 +293,6 @@ def get_similar_products(product_id, similarity_matrix, id_to_index, index_to_id
     
     return similar_products
     
-    # Sắp xếp theo điểm tương đồng giảm dần
-    similar_products = similar_products.sort_values(by='similarity_score', ascending=False)
-    
-    return similar_products
 
 def recommend_content_based(user_id, ratings, product_details, top_n=10):
     """

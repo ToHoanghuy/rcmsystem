@@ -683,11 +683,46 @@ def process_behavior_based_recommendation(user_id):
 
 def process_popular_recommendation():
     """
-    Lấy danh sách sản phẩm phổ biến
+    Lấy danh sách sản phẩm phổ biến dựa trên số lượng đánh giá, điểm trung bình, và thời gian đánh giá (time decay)
+    Áp dụng công thức weighted rating (IMDB/Bayesian) và chỉ tính các đánh giá trong 12 tháng gần nhất nếu có timestamp
     """
-    # Đơn giản là sắp xếp theo đánh giá trung bình
-    top_products = location_details.sort_values(by='rating', ascending=False).head(10)
+    import numpy as np
+    from datetime import datetime, timedelta
+    df = location_details.copy()
+    ratings_df = data.copy()
+
+    # --- Time Decay: chỉ lấy đánh giá trong 12 tháng gần nhất nếu có timestamp ---
+    if 'timestamp' in ratings_df.columns:
+        try:
+            ratings_df['timestamp'] = pd.to_datetime(ratings_df['timestamp'], errors='coerce')
+            one_year_ago = datetime.now() - timedelta(days=365)
+            ratings_df = ratings_df[ratings_df['timestamp'] >= one_year_ago]
+        except Exception as e:
+            print(f"[Popular] Warning: Could not parse timestamp for time decay: {e}")
     
+    # --- Tính số lượng đánh giá và điểm trung bình mới nhất ---
+    rating_stats = ratings_df.groupby('location_id')['rating'].agg(['mean', 'count']).reset_index()
+    rating_stats.rename(columns={'mean': 'avg_rating', 'count': 'num_ratings'}, inplace=True)
+    df = df.merge(rating_stats, left_on='product_id', right_on='location_id', how='left')
+    df['num_ratings'] = df['num_ratings'].fillna(0)
+    df['avg_rating'] = df['avg_rating'].fillna(df['rating'] if 'rating' in df.columns else 0)
+
+    # --- Weighted Rating (IMDB/Bayesian) ---
+    C = df['avg_rating'].mean() if df['avg_rating'].notnull().any() else 0
+    m = np.percentile(df['num_ratings'], 60)  # Ngưỡng tối thiểu số đánh giá (top 40% locations)
+    def weighted_rating(row):
+        v = row['num_ratings']
+        R = row['avg_rating']
+        return (v/(v+m))*R + (m/(v+m))*C if (v+m) > 0 else C
+    df['popular_score'] = df.apply(weighted_rating, axis=1)
+
+    # --- (Optional) Nếu có trường review_text, có thể tích hợp sentiment analysis ở đây ---
+    # (Để lại comment, chưa thực hiện vì chưa chắc có dữ liệu)
+    # if 'review_text' in ratings_df.columns:
+    #     ... # sentiment analysis, cộng điểm sentiment vào popular_score
+
+    # --- Sắp xếp và trả về top N ---
+    top_products = df.sort_values(by='popular_score', ascending=False).head(10)
     return top_products.to_dict(orient='records')
 
 @app.route('/evaluate', methods=['GET'])
